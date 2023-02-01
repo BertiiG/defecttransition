@@ -155,13 +155,17 @@ struct PolarEv
         h[y] = (Pol[x] * (Ks * Dyy(Pol[y]) + Kb * Dxx(Pol[y]) + (Ks - Kb) * Dxy(Pol[x])) -
                 Pol[y] * (Ks * Dxx(Pol[x]) + Kb * Dyy(Pol[x]) + (Ks - Kb) * Dxy(Pol[y])));
         Particles.ghost_get<MOLFIELD>(SKIP_LABELLING);
+        //h parallel
+        h[x] = -gama * (lambda * delmu - nu * (u[x][x] * Pol[x] * Pol[x] + u[y][y] * Pol[y] * Pol[y] + 2 * u[x][y] * Pol[x] * Pol[y]) / (H_p_b));
+
 
         // calulate FranckEnergyDensity
         FranckEnergyDensity = (Ks / 2.0) *
                               ((Dx(Pol[x]) * Dx(Pol[x])) + (Dy(Pol[x]) * Dy(Pol[x])) +
                                (Dx(Pol[y]) * Dx(Pol[y])) +
                                (Dy(Pol[y]) * Dy(Pol[y]))) +
-                              ((Kb - Ks) / 2.0) * ((Dx(Pol[y]) - Dy(Pol[x])) * (Dx(Pol[y]) - Dy(Pol[x])));
+                              ((Kb - Ks)/ 2.0) * ((Dx(Pol[y]) - Dy(Pol[x])) * (Dx(Pol[y]) - Dy(Pol[x]))) +
+                              (h[x] / 2.0) * (Pol[x] * Pol[x] + Pol[y] * Pol[y]); //is there a py missing? and where is the h_parallel term?
         Particles.ghost_get<FE>(SKIP_LABELLING);
 
         // calculate preactors for LHS of Stokes Equation.
@@ -325,9 +329,11 @@ struct PolarEv
             ++it;
         }
 
+        //h perpendicular
         h[y] = (Pol[x] * (Ks * Dyy(Pol[y]) + Kb * Dxx(Pol[y]) + (Ks - Kb) * Dxy(Pol[x])) -
                     Pol[y] * (Ks * Dxx(Pol[x]) + Kb * Dyy(Pol[x]) + (Ks - Kb) * Dxy(Pol[y])));
 
+        //h parallel
         h[x] = -gama * (lambda * delmu - nu * (u[x][x] * Pol[x] * Pol[x] + u[y][y] * Pol[y] * Pol[y] + 2 * u[x][y] * Pol[x] * Pol[y]) / (H_p_b));
 
         dPol[x] = ((h[x] * Pol[x] - h[y] * Pol[y]) / gama + lambda * delmu * Pol[x] -
@@ -473,7 +479,7 @@ int main(int argc, char* argv[])
         double dt = tf/std::atof(argv[3]);
         wr_f=int(std::atof(argv[3]));
         wr_at=int(std::atof(argv[4]));
-        V_err_eps = 5e-2; //chnge dependent of Gd
+        V_err_eps = 3e-2; //chnge dependent of Gd
         //give dimensionless value for activity as 5th value to program
         zetadelmu = std::atof(argv[5]);
         //give dimensionless value for slpay/bend as 6th value to program
