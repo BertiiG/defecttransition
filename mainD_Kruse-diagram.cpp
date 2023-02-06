@@ -109,9 +109,7 @@ struct PolarEv
         for (int j = 0; j < CorrVec.size(); j++) {
                 auto p_out = CorrVec.get<0>(j)[0];
                 auto p = CorrVec.get<0>(j)[1];
-                //std::cout<<p.getKey()<<":"<<p_out.getKey()<<" at: "<<v_cl.rank()<<std::endl;
                 Particles.getProp<0>(p_out)=Particles.getProp<0>(p);
-                //Particles.getProp<1>(p_out)=Particles.getProp<1>(p);
             }
         Particles.ghost_get<0>(SKIP_LABELLING);
 
@@ -124,7 +122,6 @@ struct PolarEv
 
         int n = 0,nmax = 300,errctr = 0, Vreset = 0;
         double V_err = 1, V_err_old,sum, sum1;
-        // std::cout << "Calculate velocity (step t=" << t << ")" << std::endl;
         timer tt;
         tt.start();
         petsc_solver<double> solverPetsc;
@@ -165,7 +162,7 @@ struct PolarEv
         h[y] =  Ks * (( Pol[x] * (Dyy(Pol[y]) + Dyx(Pol[x]))) - Pol[y] * (Dxx(Pol[x]) + Dxy(Pol[y]))) +
                 Kb * (Pol[x] * Dx(r *(Dx(Pol[y]) - Dy(Pol[x]))) +
                 Pol[y] * Dy(r *(Dx(Pol[y]) - Dy(Pol[x]))));
-                //h parallel
+        //h parallel
         h[x] =  -(gama * r) *
                 (lambda * delmu - (nu * u[x][x] * (Pol[x] * Pol[x] - Pol[y] * Pol[y]))/(r) -
                 2. * (nu * u[x][y] * Pol[x] * Pol[y])/r );
@@ -200,7 +197,7 @@ struct PolarEv
         // asigma[y][y] = 0;
         auto hx = -Kb * Pol[x] + (Dx(Pol[y]) - Dy(Pol[x])) * (Dx(Pol[y]) - Dy(Pol[x])) +
                   Kb * Dy(r * (Dx(Pol[y]) - Dy(Pol[x]))) +
-                  Ks * (Dyy(Pol[y]) + Dxy(Pol[y]));
+                  Ks * (Dxx(Pol[x]) + Dxy(Pol[y]));
         auto hy = -Kb * Pol[y] + (Dx(Pol[y]) - Dy(Pol[x])) * (Dx(Pol[y]) - Dy(Pol[x])) +
                   Kb * Dx(r * (Dx(Pol[y]) - Dy(Pol[x]))) +
                   Ks * (Dyy(Pol[y]) + Dyx(Pol[x]));
@@ -208,14 +205,14 @@ struct PolarEv
         //calculate antisymmetric STRESS -> only asigma_xy and asigma_yx
         asigma[x][x] = 0;
         asigma[x][y] = 0.5 * (Pol[x] * hy - Pol[y] * hx);
-        asigma[y][x] = 0.5 * (Pol[y] + hx - Pol[x] * hy);
+        asigma[y][x] = 0.5 * (Pol[y] * hx - Pol[x] * hy);
         asigma[y][y] = 0;
         Particles.ghost_get<ASTRESS>(SKIP_LABELLING);
         // calulate RHS of Stokes equ (without pressure (because pressure correction will be made later)
         dV[x] = - Dx(sigma[x][x]) - Dy(sigma[x][y]) - Dy(asigma[x][y]) +
-                zeta * delmu * ( Dx(Pol[x] * Pol[x]) + Dy(Pol[x] * Pol[y])) -
-
-                nu/2. * Dy(h[y] *(Pol[x] * Pol[x] - Pol[y] * Pol[y]));
+                zeta * delmu * ( 0.5 * Dx(Pol[x] * Pol[x]) + Dy(Pol[x] * Pol[y])) -
+                nu/2. * Dy(h[y] *(Pol[x] * Pol[x] - Pol[y] * Pol[y])) + 
+                nu/2. * Dx(Pol[x] * Pol[y] * h[y]);
         dV[y] = - Dy(sigma[y][y]) - Dx(sigma[y][x]) - Dx(asigma[y][x]) +
                 zeta * delmu * ( Dy(Pol[y] * Pol[y]) + Dx(Pol[x] * Pol[y])) -
                 nu/2. * (Dy(h[y] * Pol[x] * Pol[y]) +
@@ -224,56 +221,11 @@ struct PolarEv
         //calculate LHS
         auto Stokes1 = eta * Dxx(V[x]) + eta * Dyy(V[y]) +
                         nu/2. * Dx(h[x] * Pol[x] * Pol[x] +
-                        h[y] * Pol[x] * Pol[y]) +
                         nu * Dy(h[x] * Pol[y] * Pol[x]);
         auto Stokes2 = eta * Dxx(V[y]) + eta * Dyy(V[x]) +
                       nu/2. * Dy(h[x] * Pol[y] * Pol[y]) +
                       nu * Dx(h[x] * Pol[y] * Pol[x]);
-        // // calculate preactors for LHS of Stokes Equation.
-        // f1 = gama * nu * Pol[x] * Pol[x] * (Pol[x] * Pol[x] - Pol[y] * Pol[y]) / (r);
-        // f2 = 2.0 * gama * nu * Pol[x] * Pol[y] * (Pol[x] * Pol[x] - Pol[y] * Pol[y]) / (r);
-        // f3 = gama * nu * Pol[y] * Pol[y] * (Pol[x] * Pol[x] - Pol[y] * Pol[y]) / (r);
-        // f4 = 2.0 * gama * nu * Pol[x] * Pol[x] * Pol[x] * Pol[y] / (r);
-        // f5 = 4.0 * gama * nu * Pol[x] * Pol[x] * Pol[y] * Pol[y] / (r);
-        // f6 = 2.0 * gama * nu * Pol[x] * Pol[y] * Pol[y] * Pol[y] / (r);
-        // Particles.ghost_get<F1, F2, F3, F4, F5, F6>(SKIP_LABELLING);
-        // texp_v<double> Dxf1 = Dx(f1),Dxf2 = Dx(f2),Dxf3 = Dx(f3),Dxf4 = Dx(f4),Dxf5 = Dx(f5),Dxf6 = Dx(f6),
-        //                 Dyf1 = Dy(f1),Dyf2 = Dy(f2),Dyf3 = Dy(f3),Dyf4 = Dy(f4),Dyf5 = Dy(f5),Dyf6 = Dy(f6);
-        //
-        // // calculate RHS of Stokes Equation (without pressure (because pressure correction will be made later))
-        // dV[x] = -0.5 * Dy(h[y]) + zeta * Dx(delmu * Pol[x] * Pol[x]) + zeta * Dy(delmu * Pol[x] * Pol[y]) -
-        //         zeta * Dx(0.5 * delmu * (Pol[x] * Pol[x] + Pol[y] * Pol[y])) -
-        //         0.5 * nu * Dx(-2.0 * h[y] * Pol[x] * Pol[y])
-        //         - 0.5 * nu * Dy(h[y] * (Pol[x] * Pol[x] - Pol[y] * Pol[y])) - Dx(sigma[x][x]) -
-        //         Dy(sigma[x][y])
-        //         - 0.5 * nu * Dx(-gama * lambda * delmu * (Pol[x] * Pol[x] - Pol[y] * Pol[y]))
-        //         - 0.5 * Dy(-2.0 * gama * lambda * delmu * (Pol[x] * Pol[y]));
-        //
-        // dV[y] = -0.5 * Dx(-h[y]) + zeta * Dy(delmu * Pol[y] * Pol[y]) + zeta * Dx(delmu * Pol[x] * Pol[y]) -
-        //         zeta * Dy(0.5 * delmu * (Pol[x] * Pol[x] + Pol[y] * Pol[y])) -
-        //         0.5 * nu * Dy(2.0 * h[y] * Pol[x] * Pol[y])
-        //         - 0.5 * nu * Dx(h[y] * (Pol[x] * Pol[x] - Pol[y] * Pol[y])) - Dx(sigma[y][x]) -
-        //         Dy(sigma[y][y])
-        //         - 0.5 * nu * Dy(gama * lambda * delmu * (Pol[x] * Pol[x] - Pol[y] * Pol[y]))
-        //         - 0.5 * Dx(-2.0 * gama * lambda * delmu * (Pol[x] * Pol[y]));
-        // Particles.ghost_get<DV>(SKIP_LABELLING);
-        //
-        // // Encode LHS of the Stokes Equations
-        // auto Stokes1 = eta * (Dxx(V[x]) + Dyy(V[x]))
-        //                + 0.5 * nu * (Dxf1 * Dx(V[x]) + f1 * Dxx(V[x]))
-        //                + 0.5 * nu * (Dxf2 * 0.5 * (Dx(V[y]) + Dy(V[x])) + f2 * 0.5 * (Dxx(V[y]) + Dyx(V[x])))
-        //                + 0.5 * nu * (Dxf3 * Dy(V[y]) + f3 * Dyx(V[y]))
-        //                + 0.5 * nu * (Dyf4 * Dx(V[x]) + f4 * Dxy(V[x]))
-        //                + 0.5 * nu * (Dyf5 * 0.5 * (Dx(V[y]) + Dy(V[x])) + f5 * 0.5 * (Dxy(V[y]) + Dyy(V[x])))
-        //                + 0.5 * nu * (Dyf6 * Dy(V[y]) + f6 * Dyy(V[y]));
-        // auto Stokes2 = eta * (Dxx(V[y]) + Dyy(V[y]))
-        //                - 0.5 * nu * (Dyf1 * Dx(V[x]) + f1 * Dxy(V[x]))
-        //                - 0.5 * nu * (Dyf2 * 0.5 * (Dx(V[y]) + Dy(V[x])) + f2 * 0.5 * (Dxy(V[y]) + Dyy(V[x])))
-        //                - 0.5 * nu * (Dyf3 * Dy(V[y]) + f3 * Dyy(V[y]))
-        //                + 0.5 * nu * (Dxf4 * Dx(V[x]) + f4 * Dxx(V[x]))
-        //                + 0.5 * nu * (Dxf5 * 0.5 * (Dx(V[y]) + Dy(V[x])) + f5 * 0.5 * (Dxx(V[y]) + Dyx(V[x])))
-        //                + 0.5 * nu * (Dxf6 * Dy(V[y]) + f6 * Dyx(V[y]));
-
+        
         tt.stop();
         if (v_cl.rank() == 0) {
         std::cout << "Init of Velocity took " << tt.getwct() << " seconds." << std::endl;
@@ -389,13 +341,6 @@ struct PolarEv
             Particles.getProp<HPB>(p) = (Particles.getProp<HPB>(p) == 0) ? 1 : Particles.getProp<HPB>(p);
             ++it;
         }
-
-        // //h perpendicular
-        // h[y] = (Pol[x] * (Ks * Dyy(Pol[y]) + Kb * Dxx(Pol[y]) + (Ks - Kb) * Dxy(Pol[x])) -
-        //         Pol[y] * (Ks * Dxx(Pol[x]) + Kb * Dyy(Pol[x]) + (Ks - Kb) * Dxy(Pol[y])));
-        //
-        // //h parallel
-        // h[x] = -gama * (lambda * delmu - nu * (u[x][x] * Pol[x] * Pol[x] + u[y][y] * Pol[y] * Pol[y] + 2 * u[x][y] * Pol[x] * Pol[y]) / (H_p_b));
 
 
         dPol[x] = (hx / gama + lambda * delmu * Pol[x] -
@@ -690,25 +635,6 @@ int main(int argc, char* argv[])
         }
 
         std::cout << "CORRVEC SIZE " << CorrVec.size() << "\n";
-
-
-
-        // // fixed boundary condition
-        // double charge = 2.0;
-        // double deltaCharge = M_PI * charge / (2.0 * (Gd - 1.0));
-
-        // auto it2 = Particles_left.getDomainIterator();
-        // while (it2.isNext()) {
-        //     auto key = it2.get();
-
-        //     auto gkey = it2.getGKey(key);
-
-
-        //     Particles_left.getProp<POLARIZATION>(key)[x] = cos(deltaCharge * gkey.get(1));
-        //     Particles_left.getProp<POLARIZATION>(key)[y] = sin(deltaCharge * gkey.get(1));
-
-        //     ++it2;
-        // }
 
 
         auto P_bulk = getV<PRESSURE>(Particles_bulk);//Pressure only on inside
