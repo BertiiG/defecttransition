@@ -162,7 +162,7 @@ struct PolarEv
         // calculate traversal molecular field (H_perpendicular)
         h[y] =  Ks * (( Pol[x] * (Dyy(Pol[y]) + Dyx(Pol[x]))) - Pol[y] * (Dxx(Pol[x]) + Dxy(Pol[y]))) +
                 Kb * (Pol[x] * (Dx(r)*(Dx(Pol[y]) - Dy(Pol[x])) + r*(Dxx(Pol[y]) - Dxy(Pol[x])) ) +
-                Pol[y] * (Dy(r)*(Dx(Pol[y]) - Dy(Pol[x])) + r*(Dxy(Pol[y]) - Dyy(Pol[x])) ) );
+                Pol[y] * (Dy(r)*(Dx(Pol[y]) - Dy(Pol[x])) + r*(Dyx(Pol[y]) - Dyy(Pol[x])) ) );
         // h[y] = (Pol[x] * (Ks * Dyy(Pol[y]) + Kb * Dxx(Pol[y]) + (Ks - Kb) * Dxy(Pol[x])) -
         //         Pol[y] * (Ks * Dxx(Pol[x]) + Kb * Dyy(Pol[x]) + (Ks - Kb) * Dxy(Pol[y])));
 
@@ -190,23 +190,23 @@ struct PolarEv
         // W[y][x] = 0.5 * (Dx(V[y]) - Dy(V[x]));
         // W[y][y] = 0;
         //
-        //calculate antisymmetric STRESS -> only asigma_xy and asigma_yx
-        asigma[x][x] = 0;
-        asigma[x][y] = gama/2. * (nu * 0.5 * (Dy(V[x]) + Dx(V[y])) * r +
-                        0.5 * (Dx(V[y]) - Dy(V[x])) * r +
-                        2. * nu * Dy(V[y]) * Pol[x] * Pol[y]);
-        asigma[y][x] = gama/2. * (nu * 0.5 * (Dx(V[y]) + Dy(V[x])) * r +
-                        0.5 * (Dx(V[y]) - Dy(V[x])) * r +
-                        2. * nu * Dx(V[x]) * Pol[x] * Pol[y]);
-        asigma[y][y] = 0;
+        // //calculate antisymmetric STRESS -> only asigma_xy and asigma_yx
+        // asigma[x][x] = 0;
+        // asigma[x][y] = gama/2. * (nu * 0.5 * (Dy(V[x]) + Dx(V[y])) * r +
+        //                 0.5 * (Dx(V[y]) - Dy(V[x])) * r +
+        //                 2. * nu * Dy(V[y]) * Pol[x] * Pol[y]);
+        // asigma[y][x] = gama/2. * (nu * 0.5 * (Dx(V[y]) + Dy(V[x])) * r +
+        //                 0.5 * (Dx(V[y]) - Dy(V[x])) * r +
+        //                 2. * nu * Dx(V[x]) * Pol[x] * Pol[y]);
+        // asigma[y][y] = 0;
         auto hx = -Kb * Pol[x] + (Dx(Pol[y]) - Dy(Pol[x])) * (Dx(Pol[y]) - Dy(Pol[x])) +
-                  Kb * (Dy(r)*(Dx(Pol[y]) - Dy(Pol[x])) + r*(Dxy(Pol[y]) - Dyy(Pol[x])) ) +
+                  Kb * (Dy(r)*(Dx(Pol[y]) - Dy(Pol[x])) + r*(Dyx(Pol[y]) - Dyy(Pol[x])) ) +
                   Ks * (Dxx(Pol[x]) + Dxy(Pol[y]));
         auto hy = -Kb * Pol[y] + (Dx(Pol[y]) - Dy(Pol[x])) * (Dx(Pol[y]) - Dy(Pol[x])) +
-                  Kb * (Dx(r)*(Dx(Pol[y]) - Dy(Pol[x])) + r*(Dxx(Pol[y]) - Dxy(Pol[x]))) +
+                  Kb * (Dx(r)*(Dx(Pol[y]) - Dy(Pol[x])) + r*(Dxx(Pol[y]) - Dyx(Pol[x]))) +
                   Ks * (Dyy(Pol[y]) + Dyx(Pol[x]));
 
-        //calculate antisymmetric STRESS -> only asigma_xy and asigma_yx
+        // //calculate antisymmetric STRESS -> only asigma_xy and asigma_yx
         // asigma[x][x] = 0;
         // asigma[x][y] = 0.5 * (Pol[x] * hy - Pol[y] * hx);
         // asigma[y][x] = 0.5 * (Pol[y] * hx - Pol[x] * hy);
@@ -223,10 +223,20 @@ struct PolarEv
                 Dx(h[y] * (Pol[x] * Pol[x] - Pol[y] * Pol[y])));
 
         //calculate LHS
-        auto Stokes1 = eta * Dxx(V[x]) + eta * Dyy(V[y]) + Dy(asigma[x][y]) +
+        auto Stokes1 = eta * Dxx(V[x]) + eta * Dyy(V[y]) +
+                        (gama/2. * (nu * 0.5 * (Dyy(V[x]) + Dyx(V[y])) * r +
+                                        0.5 * (Dyx(V[y]) - Dyy(V[x])) * r +
+                                        2. * nu * (Dyy(V[y]) * Pol[x] * Pol[y] +
+                                        Dy(V[y]) * Dy(Pol[x]) * Pol[y] +
+                                        Dy(V[y]) * Pol[x] * Dy(Pol[y])))) +
                         nu/2. * Dx(h[x] * Pol[x] * Pol[x]) +
                         nu * Dy(h[x] * Pol[y] * Pol[x]);
-        auto Stokes2 = eta * Dxx(V[y]) + eta * Dyy(V[x]) + Dx(asigma[y][x]) +
+        auto Stokes2 = eta * Dxx(V[y]) + eta * Dyy(V[x]) +
+                      (gama/2. * (nu * 0.5 * (Dxx(V[y]) + Dxy(V[x])) * r +
+                                      0.5 * (Dxx(V[y]) - Dxy(V[x])) * r +
+                                      2. * nu * (Dxx(V[x]) * Pol[x] * Pol[y] +
+                                      Dx(V[x]) * Dx(Pol[x]) * Pol[y] +
+                                      Dx(V[x]) * Pol[x] * Dx(Pol[y])))) +
                       nu/2. * Dy(h[x] * Pol[y] * Pol[y]) +
                       nu * Dx(h[x] * Pol[y] * Pol[x]);
 
