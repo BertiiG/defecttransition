@@ -15,7 +15,7 @@
 
 constexpr int x = 0;
 constexpr int y = 1;
-constexpr int POLARIZATION= 0,VELOCITY = 1, VORTICITY = 2, NORMAL = 3,PRESSURE = 4, STRAIN_RATE = 5, STRESS = 6, MOLFIELD = 7, DPOL = 8, DV = 9, VRHS = 10, F1 = 11, F2 = 12, F3 = 13, F4 = 14, F5 = 15, F6 = 16, V_T = 17, DIV = 18, DELMU = 19, HPB = 20, FE = 21, R = 22, PID = 23, POLD = 24, ASTRESS = 25;
+constexpr int POLARIZATION= 0,VELOCITY = 1, VORTICITY = 2, NORMAL = 3,PRESSURE = 4, STRAIN_RATE = 5, STRESS = 6, MOLFIELD = 7, DPOL = 8, DV = 9, VRHS = 10, F1 = 11, F2 = 12, F3 = 13, F4 = 14, F5 = 15, F6 = 16, V_T = 17, DIV = 18, DELMU = 19, HPB = 20, FE = 21, R = 22, PID = 23, POLD = 24, ASTRESS = 25, HX=26, HY=27;
 
 double zetadelmu;
 double dkK;
@@ -38,8 +38,8 @@ double steady_tol=1e-9;
 
 void *vectorGlobal=nullptr,*vectorGlobal_bulk=nullptr,*vectorGlobal_boundary=nullptr;
 const openfpm::vector<std::string>
-PropNAMES={"00-Polarization","01-Velocity","02-Vorticity","03-Normal","04-Pressure","05-StrainRate","06-Stress","07-MolecularField","08-DPOL","09-DV","10-VRHS","11-f1","12-f2","13-f3","14-f4","15-f5","16-f6","17-V_T","18-DIV","19-DELMU","20-HPB","21-FrankEnergy","22-R","23-particleID","24-P_old", "25-ASTRESS"};
-typedef aggregate<VectorS<2, double>,VectorS<2, double>,double[2][2],VectorS<2, double>,double,double[2][2],double[2][2],VectorS<2, double>,VectorS<2, double>,VectorS<2, double>,VectorS<2, double>,double,double,double,double,double,double,VectorS<2, double>,double,double,double,double,double,int,VectorS<2, double>, double[2][2]> Activegels;
+PropNAMES={"00-Polarization","01-Velocity","02-Vorticity","03-Normal","04-Pressure","05-StrainRate","06-Stress","07-MolecularField","08-DPOL","09-DV","10-VRHS","11-f1","12-f2","13-f3","14-f4","15-f5","16-f6","17-V_T","18-DIV","19-DELMU","20-HPB","21-FrankEnergy","22-R","23-particleID","24-P_old", "25-ASTRESS", "26-HX", "27-HY"};
+typedef aggregate<VectorS<2, double>,VectorS<2, double>,double[2][2],VectorS<2, double>,double,double[2][2],double[2][2],VectorS<2, double>,VectorS<2, double>,VectorS<2, double>,VectorS<2, double>,double,double,double,double,double,double,VectorS<2, double>,double,double,double,double,double,int,VectorS<2, double>, double[2][2], double, double> Activegels;
 typedef vector_dist_ws<2, double,Activegels> vector_type;
 typedef vector_dist_subset<2, double, Activegels> vector_type2;
 
@@ -97,6 +97,9 @@ struct PolarEv
         auto div = getV<DIV>(Particles);
         auto V_t = getV<V_T>(Particles);
 
+        auto hx = getV<HX>(Particles);
+        auto hy = getV<HY>(Particles);
+
         Pol[x]=X.data.get<0>();
         Pol[y]=X.data.get<1>();
         // impose Neumann BC for polarisation given the boundary and bulk pairs
@@ -119,8 +122,8 @@ struct PolarEv
         timer tt;
         tt.start();
         petsc_solver<double> solverPetsc;
-        //solverPetsc.setSolver(KSPGMRES);
-        solverPetsc.setPreconditioner(PCLU);
+        solverPetsc.setSolver(KSPGMRES);
+        //solverPetsc.setPreconditioner(PCLU);
         // calculate erickson stress
         sigma[x][x] = - Ks * ( Dx(Pol[x]) + Dy(Pol[y]) * Dx(Pol[x]) ) +
                       Kb * (Pol[x] * Pol[x] + Pol[y] * Pol[y]) *
@@ -152,6 +155,7 @@ struct PolarEv
         u[x][y] = 0.5 * (Dx(V[y]) + Dy(V[x]));
         u[y][x] = 0.5 * (Dy(V[x]) + Dx(V[y]));
         u[y][y] = Dy(V[y]);
+        Particles.ghost_get<STRAIN_RATE>(SKIP_LABELLING);
         // calculate traversal molecular field (H_perpendicular)
         h[y] =  Ks * (( Pol[x] * (Dyy(Pol[y]) + Dyx(Pol[x]))) - Pol[y] * (Dxx(Pol[x]) + Dxy(Pol[y]))) +
                 Kb * (Pol[x] * Dx(r *(Dx(Pol[y]) - Dy(Pol[x]))) +
@@ -189,12 +193,14 @@ struct PolarEv
         //                 0.5 * (Dx(V[y]) - Dy(V[x])) * r +
         //                 2. * nu * Dx(V[x]) * Pol[x] * Pol[y]);
         // asigma[y][y] = 0;
-        auto hx = -Kb * Pol[x] + (Dx(Pol[y]) - Dy(Pol[x])) * (Dx(Pol[y]) - Dy(Pol[x])) +
-                  Kb * Dy(r * (Dx(Pol[y]) - Dy(Pol[x]))) +
+        hx = -Kb * Pol[x] * (Dx(Pol[y]) - Dy(Pol[x])) * (Dx(Pol[y]) - Dy(Pol[x])) +
+                  Kb * (Dy(r) * (Dx(Pol[y]) - Dy(Pol[x])) + r*(Dyx(Pol[y]) - Dyy(Pol[x]))) +
                   Ks * (Dxx(Pol[x]) + Dxy(Pol[y]));
-        auto hy = -Kb * Pol[y] + (Dx(Pol[y]) - Dy(Pol[x])) * (Dx(Pol[y]) - Dy(Pol[x])) +
-                  Kb * Dx(r * (Dx(Pol[y]) - Dy(Pol[x]))) +
+        Particles.ghost_get<HX>(SKIP_LABELLING);
+        hy = -Kb * Pol[y] * (Dx(Pol[y]) - Dy(Pol[x])) * (Dx(Pol[y]) - Dy(Pol[x])) +
+                  Kb * (Dx(r) * (Dx(Pol[y]) - Dy(Pol[x])) + r * (Dxx(Pol[y]) - Dxy(Pol[x]))) +
                   Ks * (Dyy(Pol[y]) + Dyx(Pol[x]));
+        Particles.ghost_get<HY>(SKIP_LABELLING);
 
         //calculate antisymmetric STRESS -> only asigma_xy and asigma_yx
         asigma[x][x] = 0;
@@ -211,6 +217,7 @@ struct PolarEv
                 zeta * delmu * ( Dy(Pol[y] * Pol[y]) + Dx(Pol[x] * Pol[y])) -
                 nu/2. * (Dy(h[y] * Pol[x] * Pol[y]) +
                 Dx(h[y] * (Pol[x] * Pol[x] - Pol[y] * Pol[y])));
+       Particles.ghost_get<DV>(SKIP_LABELLING);
 
         //calculate LHS
         auto Stokes1 = eta * Dxx(V[x]) + eta * Dyy(V[y]) +
@@ -219,6 +226,7 @@ struct PolarEv
         auto Stokes2 = eta * Dxx(V[y]) + eta * Dyy(V[x]) +
                       nu/2. * Dy(h[x] * Pol[y] * Pol[y]) +
                       nu * Dx(h[x] * Pol[y] * Pol[x]);
+
 
         tt.stop();
         if (v_cl.rank() == 0) {
@@ -320,14 +328,17 @@ struct PolarEv
         u[x][y] = 0.5 * (Dx(V[y]) + Dy(V[x]));
         u[y][x] = 0.5 * (Dy(V[x]) + Dx(V[y]));
         u[y][y] = Dy(V[y]);
+        //Particles.ghost_get<STRAIN_RATE>(SKIP_LABELLING);
 
         // calculate vorticity
         W[x][x] = 0;
         W[x][y] = 0.5 * (Dy(V[x]) - Dx(V[y]));
         W[y][x] = 0.5 * (Dx(V[y]) - Dy(V[x]));
         W[y][y] = 0;
+        //Particles.ghost_get<VORTICITY>(SKIP_LABELLING);
 
         H_p_b = Pol[x] * Pol[x] + Pol[y] * Pol[y];
+        Particles.ghost_get<HPB>(SKIP_LABELLING);
         auto it=Particles.getDomainIterator();
         while(it.isNext())
         {
@@ -335,6 +346,15 @@ struct PolarEv
             Particles.getProp<HPB>(p) = (Particles.getProp<HPB>(p) == 0) ? 1 : Particles.getProp<HPB>(p);
             ++it;
         }
+
+        h[y] =  Ks * (( Pol[x] * (Dyy(Pol[y]) + Dyx(Pol[x]))) - Pol[y] * (Dxx(Pol[x]) + Dxy(Pol[y]))) +
+                Kb * (Pol[x] * Dx(r *(Dx(Pol[y]) - Dy(Pol[x]))) +
+                Pol[y] * Dy(r *(Dx(Pol[y]) - Dy(Pol[x]))));
+        //h parallel
+        h[x] =  -(gama * r) *
+                (lambda * delmu - (nu * u[x][x] * (Pol[x] * Pol[x] - Pol[y] * Pol[y]))/(r) -
+                2. * (nu * u[x][y] * Pol[x] * Pol[y])/r );
+        Particles.ghost_get<MOLFIELD>(SKIP_LABELLING);
 
 
         dPol[x] = (hx / gama + lambda * delmu * Pol[x] -
@@ -344,6 +364,7 @@ struct PolarEv
                      nu * (u[y][x] * Pol[x] + u[y][y] * Pol[y]) -
                      W[y][x] * Pol[x])  -(V[x]*Dx(Pol[y])+V[y]*Dy(Pol[y]));
         dPol=dPol/sqrt(H_p_b);
+        Particles.ghost_get<DPOL>(SKIP_LABELLING);
         dxdt.data.get<0>()=dPol[x];
         dxdt.data.get<1>()=dPol[y];
     }
