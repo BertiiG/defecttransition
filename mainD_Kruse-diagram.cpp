@@ -4,7 +4,7 @@
 //#define SE_CLASS1
 #include "config.h"
 #define BOOST_MPL_CFG_NO_PREPROCESSED_HEADERS
-#define BOOST_MPL_LIMIT_VECTOR_SIZE 40
+#define BOOST_MPL_LIMIT_VECTOR_SIZE 50
 #include <iostream>
 #include "DCPSE/DCPSE_op/DCPSE_op.hpp"
 #include "DCPSE/DCPSE_op/DCPSE_Solver.hpp"
@@ -38,7 +38,7 @@ double steady_tol=1e-9;
 
 void *vectorGlobal=nullptr,*vectorGlobal_bulk=nullptr,*vectorGlobal_boundary=nullptr;
 const openfpm::vector<std::string>
-PropNAMES={"00-Polarization","01-Velocity","02-Vorticity","03-Normal","04-Pressure","05-StrainRate","06-Stress","07-MolecularField","08-DPOL","09-DV","10-VRHS","11-f1","12-f2","13-f3","14-f4","15-f5","16-f6","17-V_T","18-DIV","19-DELMU","20-HPB","21-FrankEnergy","22-R","23-particleID","24-P_old"};
+PropNAMES={"00-Polarization","01-Velocity","02-Vorticity","03-Normal","04-Pressure","05-StrainRate","06-Stress","07-MolecularField","08-DPOL","09-DV","10-VRHS","11-f1","12-f2","13-f3","14-f4","15-f5","16-f6","17-V_T","18-DIV","19-DELMU","20-HPB","21-FrankEnergy","22-R","23-particleID","24-P_old", "25-ASTRESS"};
 typedef aggregate<VectorS<2, double>,VectorS<2, double>,double[2][2],VectorS<2, double>,double,double[2][2],double[2][2],VectorS<2, double>,VectorS<2, double>,VectorS<2, double>,VectorS<2, double>,double,double,double,double,double,double,VectorS<2, double>,double,double,double,double,double,int,VectorS<2, double>, double[2][2]> Activegels;
 typedef vector_dist_ws<2, double,Activegels> vector_type;
 typedef vector_dist_subset<2, double, Activegels> vector_type2;
@@ -88,12 +88,6 @@ struct PolarEv
         auto sigma = getV<STRESS>(Particles);
         auto asigma = getV<ASTRESS>(Particles);
         auto FranckEnergyDensity = getV<FE>(Particles);
-        auto f1 = getV<F1>(Particles);
-        auto f2 = getV<F2>(Particles);
-        auto f3 = getV<F3>(Particles);
-        auto f4 = getV<F4>(Particles);
-        auto f5 = getV<F5>(Particles);
-        auto f6 = getV<F6>(Particles);
         auto dV = getV<DV>(Particles);
         //auto g = getV<NORMAL>(Particles);
         auto P = getV<PRESSURE>(Particles);
@@ -211,7 +205,7 @@ struct PolarEv
         // calulate RHS of Stokes equ (without pressure (because pressure correction will be made later)
         dV[x] = - Dx(sigma[x][x]) - Dy(sigma[x][y]) - Dy(asigma[x][y]) +
                 zeta * delmu * ( 0.5 * Dx(Pol[x] * Pol[x]) + Dy(Pol[x] * Pol[y])) -
-                nu/2. * Dy(h[y] *(Pol[x] * Pol[x] - Pol[y] * Pol[y])) + 
+                nu/2. * Dy(h[y] *(Pol[x] * Pol[x] - Pol[y] * Pol[y])) +
                 nu/2. * Dx(Pol[x] * Pol[y] * h[y]);
         dV[y] = - Dy(sigma[y][y]) - Dx(sigma[y][x]) - Dx(asigma[y][x]) +
                 zeta * delmu * ( Dy(Pol[y] * Pol[y]) + Dx(Pol[x] * Pol[y])) -
@@ -220,12 +214,12 @@ struct PolarEv
 
         //calculate LHS
         auto Stokes1 = eta * Dxx(V[x]) + eta * Dyy(V[y]) +
-                        nu/2. * Dx(h[x] * Pol[x] * Pol[x] +
+                        nu/2. * Dx(h[x] * Pol[x] * Pol[x]) +
                         nu * Dy(h[x] * Pol[y] * Pol[x]);
         auto Stokes2 = eta * Dxx(V[y]) + eta * Dyy(V[x]) +
                       nu/2. * Dy(h[x] * Pol[y] * Pol[y]) +
                       nu * Dx(h[x] * Pol[y] * Pol[x]);
-        
+
         tt.stop();
         if (v_cl.rank() == 0) {
         std::cout << "Init of Velocity took " << tt.getwct() << " seconds." << std::endl;
