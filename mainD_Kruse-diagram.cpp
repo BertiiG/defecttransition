@@ -20,14 +20,15 @@ constexpr int POLARIZATION= 0,VELOCITY = 1, VORTICITY = 2, NORMAL = 3,PRESSURE =
 double zetadelmu;
 double dkK;
 double eta = 5.0;
-double nu = .0;
-double gama = 5.0;
-double zeta = 1.0;
+double nu = 2.0;
+double gama = eta;
+double zeta = -3.0;
 double lambda = 1.;
 double Ks = 2.0;
+double chi2 = -3.;
+double chi4 = 1.5;
+double delmu;
 double Kb;
-double chi2 = -20.;
-double chi4 = 10.0;
 
 int wr_f;
 int wr_at;
@@ -129,8 +130,8 @@ struct PolarEv
         solverPetsc.setSolver(KSPGMRES);
         //solverPetsc.setPreconditioner(PCLU);
         // calculate erickson stress
-        sigma[x][x] = - Ks * Dx(Pol[x])*Dx(Pol[x]) - Ks * Dx(Pol[y])*Dy(Pol[x])
-                      + Kb * Dx(Pol[y])*Dx(Pol[y]) - Kb * Dy(Pol[x])*Dx(Pol[y]);
+        sigma[x][x] = - Ks * Dx(Pol[x])*Dx(Pol[x]) - Ks * Dy(Pol[x])*Dx(Pol[y])
+                      + Kb * Dy(Pol[x])*Dx(Pol[y]) - Kb * Dx(Pol[y])*Dx(Pol[y]);
         sigma[x][y] = - Ks * Dx(Pol[y])*Dx(Pol[x]) - Ks * Dy(Pol[y])*Dx(Pol[y])
                       + Kb * Dx(Pol[y])*Dx(Pol[x]) - Kb * Dy(Pol[x])*Dx(Pol[x]);
         sigma[y][x] = - Ks * Dx(Pol[x])*Dy(Pol[x]) - Ks * Dy(Pol[x])*Dy(Pol[y])
@@ -172,74 +173,92 @@ struct PolarEv
 
 
         // calculate preactors for LHS of Stokes Equation.
-        f1 = Dyy(Pol[x]);
-        f2 = Dyx(Pol[y]);
-        f3 = Dxx(Pol[x]);
-        f4 = Dxx(Pol[y]);
-        f5 = Dxy(Pol[x]);
-        f6 = Dyy(Pol[y]);
-        Particles.ghost_get<F1, F2, F3, F4, F5, F6>(SKIP_LABELLING);
+        // f1 = Dyy(Pol[x]);
+        // f2 = Dyx(Pol[y]);
+        // f3 = Dxx(Pol[x]);
+        // f4 = Dxx(Pol[y]);
+        // f5 = Dxy(Pol[x]);
+        // f6 = Dyy(Pol[y]);
+        // Particles.ghost_get<F1, F2, F3, F4, F5, F6>(SKIP_LABELLING);
         // texp_v<double> Dxf1 = Dx(f1),Dxf2 = Dx(f2),Dxf3 = Dx(f3),Dxf4 = Dx(f4),Dxf5 = Dx(f5),Dxf6 = Dx(f6),
         //                 Dyf1 = Dy(f1),Dyf2 = Dy(f2),Dyf3 = Dy(f3),Dyf4 = Dy(f4),Dyf5 = Dy(f5),Dyf6 = Dy(f6);
         //
 
-        // calulate RHS of Stokes equ (without pressure (because pressure correction will be made later)
-        dV[x] = - Dx(sigma[x][x]) + Dy(sigma[x][y]) +
-                zeta * delmu * ( 0.5 * Dx(Pol[x] * Pol[x]) + Dy(Pol[x] * Pol[y]))  +
-                nu/2. * (Kb * Dx(Pol[x]) * (Dyy(Pol[x]) - Dyx(Pol[y])) +
-                  Ks * Dx(Pol[x]) * (Dxx(Pol[x]) + Dyx(Pol[y]))-
-                  (chi2 * Pol[x] + 2. * chi4 * Pol[x] * Pol[x] * Pol[x] + 2. * chi4 * Pol[y] * Pol[y] * Pol[x]) * Dx(Pol[x])
-                  + Pol[x] * (Kb * (Dx(f1) - Dx(f2)) +
-                  Ks * (Dx(f3) + Dx(f2))-
-                  (chi2 * Dx(Pol[x]) + 2. * 3. * chi4 * Pol[x] * Pol[x] * Dx(Pol[x]) + 2. * chi4 * (2. * Pol[y] * Pol[x] * Dx(Pol[y]) + Pol[y] * Pol[y] * Dx(Pol[x])))));
-                // nu/2. * ((Pol[x] * Pol[x] - Pol[y] * Pol[y]) * Dy(h[y]) + h[y] *Dy(Pol[x] * Pol[x] - Pol[y] * Pol[y])) +
-                // nu/2. * (h[y] * Dx(Pol[x] * Pol[y]) + Pol[x] * Pol[y] * Dx(h[y])) -
-                // //terms from h_parallel
-                // nu/2. * gama * lambda * delmu * (H_p_b) * Dx(Pol[x] * Pol[x]) -
-                // nu/2. * gama * lambda * delmu * (H_p_b) * Dy(Pol[y] * Pol[x]) ;
-        dV[y] = - Dy(sigma[y][y]) + Dx(sigma[y][x]); //+
-                zeta * delmu * ( Dy(Pol[y] * Pol[y]) + Dx(Pol[x] * Pol[y]))
-                + nu/2. * (Kb * Dy(Pol[y]) * (Dxx(Pol[y]) - Dxy(Pol[x])) +
-                Ks * Dy(Pol[y]) * (Dyy(Pol[y]) + Dxy(Pol[x]))-
-                (chi2 * Pol[y] + 2. * chi4 * Pol[y] * Pol[y] * Pol[y] + 2. * chi4 * Pol[x] * Pol[x] * Pol[y]) *Dy(Pol[y])
-                + Pol[y] * (Kb * (Dy(f4) - Dy(f5)) +
-                Ks * (Dy(f6) + Dy(f5))-
-                (chi2 * Dy(Pol[y]) + 2. * chi4 * 3. * Pol[y] * Pol[y] * Dy(Pol[y]) + 2. * chi4 * ( 2. * Pol[x] * Pol[y] * Dy(Pol[x]) + Pol[x] * Pol[x] * Dy(Pol[y])))));
-                // nu/2. * ((Dy(h[y]) * Pol[x] * Pol[y] + h[y] * Dy(Pol[x] * Pol[y])) +
-                // ((Pol[x] * Pol[x] - Pol[y] * Pol[y]) * Dx(h[y]) + h[y] * Dx(Pol[x] * Pol[x] - Pol[y] * Pol[y]))) -
-                // //terms from h_parallel
-                // nu/2. * gama * lambda * delmu * (H_p_b) * Dy(Pol[y] * Pol[y]) -
-                // nu/2. * gama * lambda * delmu * (H_p_b) * Dx(Pol[y] * Pol[x]);
+        f1 = Kb * Dyy(Pol[x]) - Kb * Dyx(Pol[y]) +
+             Ks * Dxx(Pol[x]) + Ks * Dyx(Pol[y]) -
+             (chi2 * Pol[x] + 2. * chi4 * Pol[x] * Pol[x] * Pol[x] + 2. * chi4 * Pol[y] * Pol[y] * Pol[x]);
+        f2 = Kb * Dxx(Pol[y]) - Kb * Dxy(Pol[x]) +
+             Ks * Dyy(Pol[y]) + Ks * Dxy(Pol[x]) -
+             (chi2 * Pol[y] + 2. * chi4 * Pol[y] * Pol[y] * Pol[y] + 2. * chi4 * Pol[x] * Pol[x] * Pol[y]);
+
+        Particles.ghost_get<F1, F2>(SKIP_LABELLING);
+        texp_v<double> Dxf1 = Dx(f1),Dxf2 = Dx(f2), Dyf1 = Dy(f1), Dyf2 = Dy(f2);
+        // auto hx = Kb * ((Dyy(Pol[x]) - Dyx(Pol[y]))) +
+        //           Ks * (Dxx(Pol[x]) + Dyx(Pol[y]))-
+        //           (chi2 * Pol[x] + 2. * chi4 * Pol[x] * Pol[x] * Pol[x] + 2. * chi4 * Pol[y] * Pol[y] * Pol[x]);
+        // auto hy = Kb * ((Dxx(Pol[y]) - Dxy(Pol[x]))) +
+        //           Ks * (Dyy(Pol[y]) + Dxy(Pol[x]))-
+        //           (chi2 * Pol[y] + 2. * chi4 * Pol[y] * Pol[y] * Pol[y] + 2. * chi4 * Pol[x] * Pol[x] * Pol[y]);
+
+        // calulate RHS of Stokes equ (without pressure (because pressure correction will be done later)
+        dV[x] = - Dx(sigma[x][x]) - Dy(sigma[x][y]) //erickson stress
+                - .5 * (f2 * Dy(Pol[x]) + Pol[x] * Dyf2
+                        - f1 * Dy(Pol[y]) - Pol[y] * Dyf1)
+                + zeta * delmu * ( Pol[x] * Dx(Pol[x]) + Pol[y] * Dy(Pol[x]) + Pol[x] * Dy(Pol[y]))
+                - nu/2. * (f1 * Dx(Pol[x]) + Pol[x] * Dxf1
+                          + f2 * Dy(Pol[x]) + Pol[x] * Dyf2
+                          + f1 * Dy(Pol[y]) + Pol[y] * Dyf1);
+                // //antysymmetric STRESS
+                // - .5 * (hy * Dy(Pol[x]) + Pol[x] * (Kb * (Dy(f4) - Dy(f5)) +
+                //            Ks * (Dy(f6) + Dy(f5))-
+                //            (chi2 * Dy(Pol[y]) + 2. * 3. * chi4 * Pol[y] * Pol[y] * Dy(Pol[y]) + 2. * chi4 *(2. * Pol[x] * Pol[y] * Dy(Pol[x]) + Pol[x] * Pol[x] * Dy(Pol[y]))))
+                //        - (hx * Dy(Pol[y]) + Pol[y] * (Kb * (Dy(f1) - Dy(f2)) +
+                //                  Ks * (Dy(f3) + Dy(f2))-
+                //                  (chi2 * Dy(Pol[x]) + 2. * 3. * chi4 * Pol[x] * Pol[x] * Dy(Pol[x]) + 2. * chi4 * (2.* Pol[y] * Pol[x] * Dy(Pol[y]) + Pol[y] * Pol[y] * Dy(Pol[x]))))))
+                // //activity to polarity coupling
+                // + zeta * delmu * ( 0.5 * Dx(Pol[x] * Pol[x]) + Dy(Pol[x] * Pol[y]))
+                // //flow alignment
+                // - nu/2. * (hx * Dx(Pol[x]) + Pol[x] * (Kb * (Dx(f1) - Dx(f2)) +
+                //           Ks * (Dx(f3) + Dx(f2))-
+                //           (chi2 * Dx(Pol[x]) + 2. * 3. * chi4 * Pol[x] * Pol[x] * Dx(Pol[x]) + 2. * chi4 * (2.* Pol[y] * Pol[x] * Dx(Pol[y]) + Pol[y] * Pol[y] * Dx(Pol[x]))))
+                //         +  hy * Dy(Pol[x]) + Pol[x] * (Kb * (Dy(f4) - Dy(f5)) +
+                //           Ks * (Dy(f6) + Dy(f5))-
+                //           (chi2 * Dy(Pol[y]) + 2. * 3. * chi4 * Pol[y] * Pol[y] * Dy(Pol[y]) + 2. * chi4 *(2. * Pol[x] * Pol[y] * Dy(Pol[x]) + Pol[x] * Pol[x] * Dy(Pol[y]))))
+                //         +  hx * Dy(Pol[y]) + Pol[y] * (Kb * (Dy(f1) - Dy(f2)) +
+                //           Ks * (Dy(f3) + Dy(f2))-
+                //           (chi2 * Dy(Pol[x]) + 2. * 3. * chi4 * Pol[x] * Pol[x] * Dy(Pol[x]) + 2. * chi4 * (2.* Pol[y] * Pol[x] * Dy(Pol[y]) + Pol[y] * Pol[y] * Dy(Pol[x]))))
+                //         );
+        dV[y] = - Dy(sigma[y][y]) - Dx(sigma[y][x]) //erickson STRESS
+                - .5 * (f1 * Dx(Pol[y]) + Pol[y] * Dxf1
+                        - f2 * Dx(Pol[x]) - Pol[x] * Dxf2)
+                + zeta * delmu * ( Pol[y] * Dy(Pol[y]) + Pol[y] * Dx(Pol[x]) + Pol[x] * Dx(Pol[y]))
+                - nu/2. * (f2 * Dy(Pol[y]) + Pol[y] * Dyf2
+                          + f1 * Dx(Pol[y]) + Pol[y] * Dxf1
+                          + f2 * Dx(Pol[x]) + Pol[x] * Dxf2);
+                // //antisammetric STRESS
+                // - .5 *(hx * Dx(Pol[y]) + Pol[y] * (Kb * (Dx(f1) - Dx(f2)) +
+                //           Ks * (Dx(f3) + Dx(f2))-
+                //           (chi2 * Dx(Pol[x]) + 2. * 3. * chi4 * Pol[x] * Pol[x] * Dx(Pol[x]) + 2. * chi4 * (2.* Pol[y] * Pol[x] * Dx(Pol[y]) + Pol[y] * Pol[y] * Dx(Pol[x]))))
+                //       -(hy * Dx(Pol[x]) + Pol[x] * (Kb * (Dx(f4) - Dx(f5)) +
+                //                  Ks * (Dx(f6) + Dx(f5))-
+                //                  (chi2 * Dx(Pol[y]) + 2. * 3. * chi4 * Pol[y] * Pol[y] * Dx(Pol[y]) + 2. * chi4 *(2. * Pol[x] * Pol[y] * Dx(Pol[x]) + Pol[x] * Pol[x] * Dx(Pol[y]))))))
+                // //activity to polarity coupling
+                // + zeta * delmu * ( Dy(Pol[y] * Pol[y]) + Dx(Pol[x] * Pol[y]))
+                // //flow alignment
+                // - nu/2. * (hy * Dy(Pol[y]) + Pol[y] * (Kb * (Dy(f4) - Dy(f5)) +
+                //            Ks * (Dy(f6) + Dy(f5))-
+                //            (chi2 * Dy(Pol[y]) + 2. * 3. * chi4 * Pol[y] * Pol[y] * Dy(Pol[y]) + 2. * chi4 *(2. * Pol[x] * Pol[y] * Dy(Pol[x]) + Pol[x] * Pol[x] * Dy(Pol[y]))))
+                //         +  hx * Dx(Pol[y]) + Pol[y] * (Kb * (Dx(f1) - Dx(f2)) +
+                //            Ks * (Dx(f3) + Dx(f2))-
+                //            (chi2 * Dx(Pol[x]) + 2. * 3. * chi4 * Pol[x] * Pol[x] * Dx(Pol[x]) + 2. * chi4 * (2.* Pol[y] * Pol[x] * Dx(Pol[y]) + Pol[y] * Pol[y] * Dx(Pol[x]))))
+                //         +  hy * Dx(Pol[x]) + Pol[x] * (Kb * (Dx(f4) - Dx(f5)) +
+                //            Ks * (Dx(f6) + Dx(f5))-
+                //            (chi2 * Dx(Pol[y]) + 2. * 3. * chi4 * Pol[y] * Pol[y] * Dx(Pol[y]) + 2. * chi4 *(2. * Pol[x] * Pol[y] * Dx(Pol[x]) + Pol[x] * Pol[x] * Dx(Pol[y]))))
+                // );
 
         //calculate LHS
-        auto Stokes1 = eta * Dxx(V[x]) + eta * Dyy(V[x]);// +
-                        // //asymmetric stress
-                        // (gama/2. * (nu * 0.5 * (H_p_b * (Dyy(V[x]) + Dyx(V[y])) + (Dy(V[x]) + Dx(V[y])) * Dy(H_p_b)) +
-                        //                 0.5 * (H_p_b * (Dyx(V[y]) - Dyy(V[x])) + (Dx(V[y]) - Dy(V[x])) * Dy(H_p_b))+
-                        //                 2. * nu * (Pol[x] * Pol[y] * Dyy(V[y]) +
-                        //                 Pol[y] * Dy(V[y]) * Dy(Pol[x]) +
-                        //                 Pol[x] * Dy(V[y]) * Dy(Pol[y])))) -
-                        // //h_parallel terms
-                        // nu/2. * (f1 * Dxx(V[x]) + Dxf1 * Dx(V[x])) -
-                        // nu/2. * (f3 * Dxy(V[y]) + Dxf3 * Dy(V[y]) ) -
-                        // nu/2. * (f2 * (Dxx(V[y]) + Dxy(V[x])) + Dxf2 * (Dx(V[y]) + Dy(V[x])) ) -
-                        // nu/2. * (f2 * Dyx(V[x]) + Dxf2 * Dx(V[x]) ) -
-                        // nu * (f6 * Dyy(V[y]) + Dxf6 * Dy(V[y]) ) -
-                        // nu * 2. * (f3 * Dyx(V[x]) + Dxf3 * Dx(V[x])) ;
-        auto Stokes2 = eta * Dxx(V[y]) + eta * Dyy(V[y]); //+
-                      // //antisymmetric stress
-                      // (gama/2. * (nu * 0.5 * (H_p_b * (Dxx(V[y]) + Dxy(V[x])) + (Dx(V[y]) + Dy(V[x])) * Dx(H_p_b))+
-                      //                 0.5 * (H_p_b * (Dxx(V[y]) - Dxy(V[x])) + (Dx(V[y]) - Dy(V[x])) * Dx(H_p_b))+
-                      //                 2. * nu * (Pol[x] * Pol[y] * Dxx(V[x]) +
-                      //                 Pol[y] * Dx(V[x]) * Dx(Pol[x]) +
-                      //                 Pol[x] * Dx(V[x]) * Dx(Pol[y])))) -
-                      // // h_parallel terms
-                      // nu/2. * (f3 * Dyx(V[x]) + Dxf3 * Dx(V[x])) -
-                      // nu/2. * (f4 * Dyy(V[y]) + Dxf4 * Dy(V[y]) ) -
-                      // nu/2. * (f6 * (Dyx(V[y]) + Dyy(V[x])) + Dxf6 * (Dx(V[y]) + Dy(V[x])) ) -
-                      // nu/2. * (Dxf6 * Dxx(V[x]) + Dxf2 * Dx(V[x]) ) -
-                      // nu * (f3 * Dxy(V[y]) + Dxf3 * Dy(V[y]) ) -
-                      // nu * (f5 * Dxx(V[x]) + Dxf5 * Dx(V[x]) );
+        auto Stokes1 = eta * Dxx(V[x]) + eta * Dyy(V[x]);
+        auto Stokes2 = eta * Dxx(V[y]) + eta * Dyy(V[y]);
 
         tt.stop();
         if (v_cl.rank() == 0) {
@@ -344,18 +363,18 @@ struct PolarEv
                       << std::endl;
         }
 
-        //Particles.ghost_get<VELOCITY>(SKIP_LABELLING);
-        // calculate strain rate
-        // u[x][x] = Dx(V[x]);
-        // u[x][y] = 0.5 * (Dx(V[y]) + Dy(V[x]));
-        // u[y][x] = 0.5 * (Dy(V[x]) + Dx(V[y]));
-        // u[y][y] = Dy(V[y]);
-        //
-        // // calculate vorticity
-        // W[x][x] = 0;
-        // W[x][y] = 0.5 * (Dy(V[x]) - Dx(V[y]));
-        // W[y][x] = 0.5 * (Dx(V[y]) - Dy(V[x]));
-        // W[y][y] = 0;
+        Particles.ghost_get<VELOCITY>(SKIP_LABELLING);
+        //calculate strain rate
+        u[x][x] = Dx(V[x]);
+        u[x][y] = 0.5 * (Dx(V[y]) + Dy(V[x]));
+        u[y][x] = 0.5 * (Dy(V[x]) + Dx(V[y]));
+        u[y][y] = Dy(V[y]);
+
+        // calculate vorticity
+        W[x][x] = 0;
+        W[x][y] = 0.5 * (Dy(V[x]) - Dx(V[y]));
+        W[y][x] = 0.5 * (Dx(V[y]) - Dy(V[x]));
+        W[y][y] = 0;
 
         //H_p_b = Pol[x] * Pol[x] + Pol[y] * Pol[y];
         auto it=Particles.getDomainIterator();
@@ -366,16 +385,30 @@ struct PolarEv
         //     ++it;
         // }
 
-        dPol[x] = (Kb * ((Dyy(Pol[x]) - Dyx(Pol[y]))) +
-                   Ks * (Dxx(Pol[x]) + Dyx(Pol[y]))-
-                   (chi2 * Pol[x] + 2. * chi4 * Pol[x] * Pol[x] * Pol[x] + 2. * chi4 * Pol[y] * Pol[y] * Pol[x])) / gama;
-                   + 0.5 * (Dy(V[x])- Dx(V[y])) * Pol[y]
-                   - (V[x] * Dx(Pol[x]) + V[y] * Dy(Pol[x]));
-        dPol[y] = (Kb * ((Dxx(Pol[y]) - Dxy(Pol[x]))) +
-                   Ks * (Dyy(Pol[y]) + Dxy(Pol[x]))-
-                   (chi2 * Pol[y] + 2. * chi4 * Pol[y] * Pol[y] * Pol[y] + 2. * chi4 * Pol[x] * Pol[x] * Pol[y])) / gama;
-                   + 0.5 * (Dx(V[y])- Dy(V[x])) * Pol[x]
-                   - (V[x] * Dx(Pol[y]) + V[y] * Dy(Pol[y]));
+        dPol[x] = f1/gama
+                  // (Kb * ((Dyy(Pol[x]) - Dyx(Pol[y]))) +
+                  //  Ks * (Dxx(Pol[x]) + Dyx(Pol[y]))-
+                  //  (chi2 * Pol[x] + 2. * chi4 * Pol[x] * Pol[x] * Pol[x] + 2. * chi4 * Pol[y] * Pol[y] * Pol[x])) / gama
+                   + W[x][y] * Pol[y]
+                   - nu * u[x][x] * Pol[x] - nu * u[x][y] * Pol[y]
+                   - nu * u[x][x] * Pol[x] - nu * u[y][y] * Pol[x]
+                   - (V[x] * Dx(Pol[x]) + V[y] * Dy(Pol[x]))
+                   - Pol[x] * (Dx(V[x]) + Dy(V[y]))
+                   + lambda * delmu * Pol[x]
+                   ;
+
+        dPol[y] = f2/gama
+                  // (Kb * ((Dxx(Pol[y]) - Dxy(Pol[x]))) +
+                  //  Ks * (Dyy(Pol[y]) + Dxy(Pol[x]))-
+                  //  (chi2 * Pol[y] + 2. * chi4 * Pol[y] * Pol[y] * Pol[y] + 2. * chi4 * Pol[x] * Pol[x] * Pol[y])) / gama
+                   + W[y][x] * Pol[x]
+                   - nu * u[y][x] * Pol[x] - nu * u[y][y] * Pol[y]
+                   - nu * u[x][x] * Pol[y] - nu * u[y][y] * Pol[y]
+                   - (V[x] * Dx(Pol[y]) + V[y] * Dy(Pol[y]))
+                   - Pol[y] * (Dx(V[x]) + Dy(V[y]))
+                   + lambda * delmu * Pol[y]
+                   ;
+                   //
         //dPol=dPol/sqrt(H_p_b);
         dxdt.data.get<0>()=dPol[x];
         dxdt.data.get<1>()=dPol[y];
@@ -513,15 +546,19 @@ int main(int argc, char* argv[])
         double dt = tf/std::atof(argv[3]);
         wr_f=int(std::atof(argv[3]));
         wr_at=int(std::atof(argv[4]));
-        V_err_eps = 8e-2; //chnge dependent of Gd
+        V_err_eps = 3e-4; //chnge dependent of Gd
         //give dimensionless value for activity as 5th value to program
-        zetadelmu = std::atof(argv[5]);
+        zetadelmu = double(std::atof(argv[5]));
         //give dimensionless value for slpay/bend as 6th value to program
         dkK = double(std::atof(argv[6]));
         //std::cout << "dkK = "<<dkK << '\n';
         //give angle as 7th value for program
-        double phi = M_PI*std::atof(argv[7]);
+        double phi = M_PI*double(std::atof(argv[7]));
         Kb = (dkK + 1.) * Ks;
+        std::cout << "Kb = " << Kb << '\n';
+        //calculate delmu from given parameter
+        delmu = (zetadelmu * Ks)/(pow((Gd/2.), 2.) * (zeta + nu * gama * lambda));
+        std::cout << "delmu = " << delmu << '\n';
 
         //std::cout << "Kb = "<< Kb << '\n';
         double boxsize = 10.0;
@@ -633,7 +670,8 @@ int main(int argc, char* argv[])
 
         //delmu = 0.5;
         //calculate delmu from given parameter
-        delmu = (zetadelmu * Ks)/(pow(Gd, 2.) * (zeta + nu * gama * lambda));
+        //delmu = -70.0;//(zetadelmu * Ks)/(pow(Gd, 2.) * (zeta + nu * gama * lambda));
+        //std::cout << "delmu = " << delmu << '\n';
         P = 0;V = 0,dPol=0,Pol_old=0;
 
         Particles.ghost_get<POLARIZATION,NORMAL,DELMU,DPOL>(SKIP_LABELLING);
@@ -674,11 +712,16 @@ int main(int argc, char* argv[])
         auto div_bulk = getV<DIV>(Particles_bulk);
 
         //insert randomness to angle -> not already start with steady state
-        double max = 0.1;
+        double max = 0.2;
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_real_distribution<> dis(0.0, max);
 
+        for (int k = 0; k<boundary.size(); k++){
+          double s = (dis(gen) - (max/2.)) * M_PI;
+          Particles_boundary.getProp<POLARIZATION>(k)[x] = cos(s)*Particles_boundary.getProp<POLARIZATION>(k)[x] - sin(s)*Particles_boundary.getProp<POLARIZATION>(k)[y];
+          Particles_boundary.getProp<POLARIZATION>(k)[y] = sin(s)*Particles_boundary.getProp<POLARIZATION>(k)[x] + cos(s)*Particles_boundary.getProp<POLARIZATION>(k)[y];
+        }
         for (int l = 0; l < bulk.size(); l++){
           double v = (dis(gen) - (max/2.)) * M_PI;
           Particles_bulk.getProp<POLARIZATION>(l)[x] = cos(v)*Particles_bulk.getProp<POLARIZATION>(l)[x] - sin(v)*Particles_bulk.getProp<POLARIZATION>(l)[y];
