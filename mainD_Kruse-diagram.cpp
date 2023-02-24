@@ -17,16 +17,18 @@ constexpr int x = 0;
 constexpr int y = 1;
 constexpr int POLARIZATION= 0,VELOCITY = 1, VORTICITY = 2, NORMAL = 3,PRESSURE = 4, STRAIN_RATE = 5, STRESS = 6, MOLFIELD = 7, DPOL = 8, DV = 9, VRHS = 10, F1 = 11, F2 = 12, F3 = 13, F4 = 14, F5 = 15, F6 = 16, V_T = 17, DIV = 18, DELMU = 19, HPB = 20, FE = 21, R = 22, PID = 23, POLD = 24;
 
-double zetadelmu;
-double dkK;
+
 double eta = 5.0;
 double nu = 2.0;
 double gama = eta;
-double zeta = -3.0;
-double lambda = 10.;
+double zeta = -10.0;
+double lambda = 15.;
 double Ks = 3.0;
-double chi2 = -4.;
+double chi2 = -3.;
 double chi4 = -chi2/2.;
+double k = 0.1;
+double zetadelmu;
+double dkK;
 double delmu;
 double Kb;
 double sum2;
@@ -41,7 +43,7 @@ timer gt;
 timer tt2;
 
 int flag = 1;
-double steady_tol=8e-10;
+double steady_tol=1e-9;
 
 void *vectorGlobal=nullptr,*vectorGlobal_bulk=nullptr,*vectorGlobal_boundary=nullptr;
 const openfpm::vector<std::string>
@@ -98,9 +100,9 @@ struct PolarEv
         auto f1 = getV<F1>(Particles);
         auto f2 = getV<F2>(Particles);
         auto f3 = getV<F3>(Particles);
-        auto f4 = getV<F4>(Particles);
-        auto f5 = getV<F5>(Particles);
-        auto f6 = getV<F6>(Particles); //use for old FranckEnergyDensity
+        // auto f4 = getV<F4>(Particles);
+        // auto f5 = getV<F5>(Particles);
+        // auto f6 = getV<F6>(Particles); //use for old FranckEnergyDensity
         auto dV = getV<DV>(Particles);
         //auto g = getV<NORMAL>(Particles);
         auto P = getV<PRESSURE>(Particles);
@@ -135,13 +137,17 @@ struct PolarEv
         //solverPetsc.setPreconditioner(PCLU);
         // calculate erickson stress
         sigma[x][x] = - Ks * Dx(Pol[x])*Dx(Pol[x]) - Ks * Dy(Pol[x])*Dx(Pol[y])
-                      + Kb * Dy(Pol[x])*Dx(Pol[y]) - Kb * Dx(Pol[y])*Dx(Pol[y]);
+                      + Kb * Dy(Pol[x])*Dx(Pol[y]) - Kb * Dx(Pol[y])*Dx(Pol[y])
+                      - k * Dx(Pol[x]);
         sigma[x][y] = - Ks * Dx(Pol[y])*Dx(Pol[x]) - Ks * Dy(Pol[y])*Dx(Pol[y])
-                      + Kb * Dx(Pol[y])*Dx(Pol[x]) - Kb * Dy(Pol[x])*Dx(Pol[x]);
+                      + Kb * Dx(Pol[y])*Dx(Pol[x]) - Kb * Dy(Pol[x])*Dx(Pol[x])
+                      - k * Dx(Pol[y]);
         sigma[y][x] = - Ks * Dx(Pol[x])*Dy(Pol[x]) - Ks * Dy(Pol[x])*Dy(Pol[y])
-                      + Kb * Dy(Pol[x])*Dy(Pol[y]) - Kb * Dx(Pol[y])*Dy(Pol[y]);
+                      + Kb * Dy(Pol[x])*Dy(Pol[y]) - Kb * Dx(Pol[y])*Dy(Pol[y])
+                      - k  * Dy(Pol[x]);
         sigma[y][y] = - Ks * Dx(Pol[y])*Dy(Pol[x]) - Ks * Dy(Pol[y])*Dy(Pol[y])
-                      + Kb * Dx(Pol[y])*Dy(Pol[x]) - Kb * Dy(Pol[x])*Dy(Pol[x]);
+                      + Kb * Dx(Pol[y])*Dy(Pol[x]) - Kb * Dy(Pol[x])*Dy(Pol[x])
+                      - k * Dy(Pol[y]);
         Particles.ghost_get<STRESS>(SKIP_LABELLING);
 
         Particles.deleteGhost();
@@ -154,7 +160,8 @@ struct PolarEv
                               (Dy(Pol[y]) * Dy(Pol[y])) + 2. * Dx(Pol[y]) * Dy(Pol[x])) +
                               (Kb/2.0) * ((Dx(Pol[y]))*(Dx(Pol[y])) - 2. * (Dx(Pol[y]))*(Dy(Pol[x])) + (Dy(Pol[x]))*(Dy(Pol[x])) ) +
                               chi2/2. * (Pol[x] * Pol[x] + Pol[y] * Pol[y]) +
-                              chi4/2. * (Pol[x] * Pol[x] * Pol[x] * Pol[x] + Pol[y] * Pol[y] * Pol[y] * Pol[y] + 2 * Pol[x] * Pol[x] * Pol[y] * Pol[y]);
+                              chi4/2. * (Pol[x] * Pol[x] * Pol[x] * Pol[x] + Pol[y] * Pol[y] * Pol[y] * Pol[y] + 2 * Pol[x] * Pol[x] * Pol[y] * Pol[y])
+                              + k * (Dx(Pol[x]) + Dy(Pol[y]));
         Particles.ghost_get<FE>(SKIP_LABELLING);
 
 
@@ -436,7 +443,7 @@ struct CalcVelocity
         std::cout << "angle = " << anglesum << '\n';
         bool minimum;
         for (int i=0; i<fes.size();i++){if(sum2<fes[i]){minimum=true;}}
-        if (minimum && ctr >100 && fabs(anglesum_old-anglesum)<=1e-10) {
+        if (minimum && ctr >100 && fabs(anglesum_old-anglesum)<=steady_tol) {
             tt2.stop();
             if(v_cl.rank()==0)
                   {std::cout<<"Steady State Reached at angle = " << anglesum <<'\n';
@@ -506,7 +513,7 @@ int main(int argc, char* argv[])
         double dt = tf/std::atof(argv[3]);
         wr_f=int(std::atof(argv[3]));
         wr_at=int(std::atof(argv[4]));
-        V_err_eps = 3e-5; //chnge dependent of Gd
+        V_err_eps = 1e-5; //chnge dependent of Gd
         //give dimensionless value for activity as 5th value to program
         zetadelmu = double(std::atof(argv[5]));
         //give dimensionless value for slpay/bend as 6th value to program
