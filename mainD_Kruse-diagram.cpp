@@ -18,15 +18,15 @@ constexpr int y = 1;
 constexpr int POLARIZATION= 0,VELOCITY = 1, VORTICITY = 2, NORMAL = 3,PRESSURE = 4, STRAIN_RATE = 5, STRESS = 6, MOLFIELD = 7, DPOL = 8, DV = 9, VRHS = 10, F1 = 11, F2 = 12, F3 = 13, F4 = 14, F5 = 15, F6 = 16, V_T = 17, DIV = 18, DELMU = 19, HPB = 20, FE = 21, R = 22, PID = 23, POLD = 24;
 
 
-double eta = 5.0;
-double nu = 2.0;
-double gama = eta;
-double zeta = -10.0;
-double lambda = 15.;
-double Ks = 3.0;
-double chi2 = -3.;
+double eta = 10.0;
+double nu = 3.0;
+double gama = 10.0;
+double zeta = -1.0;
+double lambda = .0;
+double Ks = 1.0;
+double chi2 = -5.;
 double chi4 = -chi2/2.;
-double k = 0.1;
+double k = .0;
 double zetadelmu;
 double dkK;
 double delmu;
@@ -43,7 +43,7 @@ timer gt;
 timer tt2;
 
 int flag = 1;
-double steady_tol=1e-9;
+double steady_tol=1e-10;
 
 void *vectorGlobal=nullptr,*vectorGlobal_bulk=nullptr,*vectorGlobal_boundary=nullptr;
 const openfpm::vector<std::string>
@@ -54,17 +54,18 @@ typedef vector_dist_subset<2, double, Activegels> vector_type2;
 
 openfpm::vector<aggregate<vect_dist_key_dx[2]>> CorrVec;        // vector to store the Ids for the Neumann BC, 0: boundary 1: bulk
 
+std::vector<double> avangle;
 //Functor to Compute RHS of the time derivative of the polarity
 template<typename DX,typename DY,typename DXX,typename DXY,typename DYY>
 struct PolarEv
 {
-    DX &Dx;
-    DY &Dy;
+    DX &Dx, &Bulk_Dx;
+    DY &Dy, &Bulk_Dy;
     DXX &Dxx;
     DXY &Dxy;
     DYY &Dyy;
     //Constructor
-    PolarEv(DX &Dx,DY &Dy,DXX &Dxx,DXY &Dxy,DYY &Dyy):Dx(Dx),Dy(Dy),Dxx(Dxx),Dxy(Dxy),Dyy(Dyy)
+    PolarEv(DX &Dx,DY &Dy,DXX &Dxx,DXY &Dxy,DYY &Dyy, DX &Bulk_Dx,DY &Bulk_Dy):Dx(Dx),Dy(Dy),Dxx(Dxx),Dxy(Dxy),Dyy(Dyy),Bulk_Dx(Bulk_Dx),Bulk_Dy(Bulk_Dy)
     {}
 
     void operator()( const state_type_2d_ofp &X , state_type_2d_ofp &dxdt , const double t ) const
@@ -85,6 +86,7 @@ struct PolarEv
         auto Pol_bulk=getV<POLARIZATION>(Particles_bulk);
         auto V = getV<VELOCITY>(Particles);
         auto Vbdry = getV<VELOCITY>(Particles_boundary);
+        auto dVbdry = getV<DV>(Particles_boundary);
         auto h = getV<MOLFIELD>(Particles);
         auto u = getV<STRAIN_RATE>(Particles);
         auto dPol = getV<DPOL>(Particles);
@@ -93,6 +95,7 @@ struct PolarEv
         //auto H_p_b = getV<HPB>(Particles);
         auto r = getV<R>(Particles);
         auto dPol_bulk = getV<DPOL>(Particles_bulk);
+        auto dPol_boundary = getV<DPOL>(Particles_boundary);
 
         auto sigma = getV<STRESS>(Particles);
         // auto asigma = getV<ASTRESS>(Particles);
@@ -100,8 +103,8 @@ struct PolarEv
         auto f1 = getV<F1>(Particles);
         auto f2 = getV<F2>(Particles);
         auto f3 = getV<F3>(Particles);
-        // auto f4 = getV<F4>(Particles);
-        // auto f5 = getV<F5>(Particles);
+        auto f4 = getV<F4>(Particles);
+        auto f5 = getV<F5>(Particles);
         // auto f6 = getV<F6>(Particles); //use for old FranckEnergyDensity
         auto dV = getV<DV>(Particles);
         //auto g = getV<NORMAL>(Particles);
@@ -112,17 +115,21 @@ struct PolarEv
         auto div = getV<DIV>(Particles);
         auto V_t = getV<V_T>(Particles);
 
-        Pol[x]=X.data.get<0>();
-        Pol[y]=X.data.get<1>();
+
+        //impose Dirichlet BC here?
         // impose Neumann BC for polarisation given the boundary and bulk pairs
         for (int j = 0; j < CorrVec.size(); j++) {
                 auto p_out = CorrVec.get<0>(j)[0];
                 auto p = CorrVec.get<0>(j)[1];
-                Particles.getProp<0>(p_out)=Particles.getProp<0>(p);
+                // Particles.getProp<0>(p_out)=Particles.getProp<0>(p);
+                // Particles.getProp<F3>(p_out)=Particles.getProp<F3>(p);
+                Particles.getProp<0>(p) = Particles.getProp<0>(p_out);
+                Particles.getProp<F3>(p) = Particles.getProp<F3>(p_out);
             }
-        Particles.ghost_get<0>(SKIP_LABELLING);
-
-        Particles.ghost_get<POLARIZATION>(SKIP_LABELLING);
+        //Particles.ghost_get<0>(SKIP_LABELLING);
+        Pol_bulk[x]=X.data.get<0>();
+        Pol_bulk[y]=X.data.get<1>();
+        Particles.ghost_get<POLARIZATION, F3>(SKIP_LABELLING);
 
         eq_id x_comp, y_comp;
         x_comp.setId(0);
@@ -134,20 +141,25 @@ struct PolarEv
         tt.start();
         petsc_solver<double> solverPetsc;
         solverPetsc.setSolver(KSPGMRES);
+        solverPetsc.setPreconditioner(PCJACOBI);
         //solverPetsc.setPreconditioner(PCLU);
         // calculate erickson stress
         sigma[x][x] = - Ks * Dx(Pol[x])*Dx(Pol[x]) - Ks * Dy(Pol[x])*Dx(Pol[y])
                       + Kb * Dy(Pol[x])*Dx(Pol[y]) - Kb * Dx(Pol[y])*Dx(Pol[y])
-                      - k * Dx(Pol[x]);
+                      - k * Dx(Pol[x])
+                      ;
         sigma[x][y] = - Ks * Dx(Pol[y])*Dx(Pol[x]) - Ks * Dy(Pol[y])*Dx(Pol[y])
                       + Kb * Dx(Pol[y])*Dx(Pol[x]) - Kb * Dy(Pol[x])*Dx(Pol[x])
-                      - k * Dx(Pol[y]);
+                      - k * Dx(Pol[y])
+                      ;
         sigma[y][x] = - Ks * Dx(Pol[x])*Dy(Pol[x]) - Ks * Dy(Pol[x])*Dy(Pol[y])
                       + Kb * Dy(Pol[x])*Dy(Pol[y]) - Kb * Dx(Pol[y])*Dy(Pol[y])
-                      - k  * Dy(Pol[x]);
+                      - k  * Dy(Pol[x])
+                      ;
         sigma[y][y] = - Ks * Dx(Pol[y])*Dy(Pol[x]) - Ks * Dy(Pol[y])*Dy(Pol[y])
                       + Kb * Dx(Pol[y])*Dy(Pol[x]) - Kb * Dy(Pol[x])*Dy(Pol[x])
-                      - k * Dy(Pol[y]);
+                      - k * Dy(Pol[y])
+                      ;
         Particles.ghost_get<STRESS>(SKIP_LABELLING);
 
         Particles.deleteGhost();
@@ -161,7 +173,8 @@ struct PolarEv
                               (Kb/2.0) * ((Dx(Pol[y]))*(Dx(Pol[y])) - 2. * (Dx(Pol[y]))*(Dy(Pol[x])) + (Dy(Pol[x]))*(Dy(Pol[x])) ) +
                               chi2/2. * (Pol[x] * Pol[x] + Pol[y] * Pol[y]) +
                               chi4/2. * (Pol[x] * Pol[x] * Pol[x] * Pol[x] + Pol[y] * Pol[y] * Pol[y] * Pol[y] + 2 * Pol[x] * Pol[x] * Pol[y] * Pol[y])
-                              + k * (Dx(Pol[x]) + Dy(Pol[y]));
+                              + k * (Dx(Pol[x]) + Dy(Pol[y]))
+                              ;
         Particles.ghost_get<FE>(SKIP_LABELLING);
 
 
@@ -175,6 +188,12 @@ struct PolarEv
 
         Particles.ghost_get<F1, F2>(SKIP_LABELLING);
         texp_v<double> Dxf1 = Dx(f1),Dxf2 = Dx(f2), Dyf1 = Dy(f1), Dyf2 = Dy(f2);
+
+        //H_perpendicular
+        f4 = f2 * Pol[x] - f1 * Pol[y];
+        //H_parallel
+        f5 = f1 * Pol[x] + f2 * Pol[y];
+        Particles.ghost_get<F4, F5>(SKIP_LABELLING);
 
         // calulate RHS of Stokes equ (without pressure (because pressure correction will be done later)
         dV[x] = - Dx(sigma[x][x]) - Dy(sigma[x][y]) //erickson stress
@@ -210,12 +229,12 @@ struct PolarEv
             P = 0;
             Vreset = 0;
         }
-        P=0;
+        //P=0;
 
         // integrate velocity
         Particles.ghost_get<PRESSURE>(SKIP_LABELLING);
-        RHS_bulk[x] = dV[x];
-        RHS_bulk[y] = dV[y];
+        RHS[x] = dV[x] + Bulk_Dx(P);
+        RHS[y] = dV[y] + Bulk_Dy(P);
         Particles.ghost_get<VRHS>(SKIP_LABELLING);
 
         // prepare solver
@@ -231,15 +250,17 @@ struct PolarEv
         div = -(Dx(V[x]) + Dy(V[y]));
         //std::cout << "div =" << Particles.getProp<DIV>(1) << '\n';
         //std::cout << "V = " << Particles.getProp<VELOCITY>(1)[0] << '\n';
-        P_bulk = P + 0.01*div;
+        P = P + 1e-6*div;
+        //P_bulk = P + 0.00001*div;
 
         // approximate velocity
         while (V_err >= V_err_eps && n <= nmax) {
             Vbdry=0;
+            dVbdry =0;
             Particles.ghost_get<PRESSURE>(SKIP_LABELLING);
             //pressure correction
-            RHS_bulk[x] = dV[x] + Dx(P);
-            RHS_bulk[y] = dV[y] + Dy(P);
+            RHS[x] = dV[x] + Dx(P);
+            RHS[y] = dV[y] + Dy(P);
             Particles.ghost_get<VRHS>(SKIP_LABELLING);
             Solver.reset_b();
             Solver.impose_b(bulk, RHS[0], x_comp); //update b Seite von Gleichung
@@ -251,7 +272,8 @@ struct PolarEv
 
             Particles.ghost_get<VELOCITY>(SKIP_LABELLING);
             div = -(Dx(V[x]) + Dy(V[y]));
-            P_bulk = P + 0.01*div;
+            P = P + 1e-6*div;
+            //P_bulk = P + 0.00001*div;
             // calculate error
             sum = 0;
             sum1 = 0;
@@ -273,12 +295,12 @@ struct PolarEv
             sum = sqrt(sum);
             sum1 = sqrt(sum1);
             V_err_old = V_err;
-            if (sum1==0){sum1 = 0;}else{sum1=sum1;}
+            //if (sum1==0){sum1 = 0;}else{sum1=sum1;}
             // std::cout << "sum = "<< sum << '\n';
             // std::cout << "sum1 = "<< sum1 << '\n';
             V_err = sum / sum1;
             //if (sum1 !=0) {V_err = sum / sum1;} else {V_err = 0;}
-            if (V_err > V_err_old || abs(V_err_old - V_err) < 1e-8) {
+            if (V_err > V_err_old || abs(V_err_old - V_err) < 1e-6) {
                 errctr++;
             } else {
                 errctr = 0;
@@ -317,23 +339,23 @@ struct PolarEv
         //H_p_b = Pol[x] * Pol[x] + Pol[y] * Pol[y];
         auto it=Particles.getDomainIterator();
 
-        dPol[x] = f1/gama
+        dPol_bulk[x] = f1/gama
                   + W[x][y] * Pol[y]
                    - nu * u[x][x] * Pol[x] - nu * u[x][y] * Pol[y]
                    - nu * u[x][x] * Pol[x] - nu * u[y][y] * Pol[x]
                    - (V[x] * Dx(Pol[x]) + V[y] * Dy(Pol[x]))
-                   - Pol[x] * (Dx(V[x]) + Dy(V[y]))
                    + lambda * delmu * Pol[x]
                    ;
 
-        dPol[y] = f2/gama
+        dPol_bulk[y] = f2/gama
                   + W[y][x] * Pol[x]
                    - nu * u[y][x] * Pol[x] - nu * u[y][y] * Pol[y]
                    - nu * u[x][x] * Pol[y] - nu * u[y][y] * Pol[y]
                    - (V[x] * Dx(Pol[y]) + V[y] * Dy(Pol[y]))
-                   - Pol[y] * (Dx(V[x]) + Dy(V[y]))
                    + lambda * delmu * Pol[y]
                    ;
+        // dPol_boundary[x] = 0;
+        // dPol_boundary[y] = 0;
 
         dxdt.data.get<0>()=dPol[x];
         dxdt.data.get<1>()=dPol[y];
@@ -375,6 +397,8 @@ struct CalcVelocity
         auto Pol=getV<POLARIZATION>(Particles);
         auto Pol_bulk=getV<POLARIZATION>(Particles_bulk);
         auto dPol = getV<DPOL>(Particles);
+        auto dPol_bulk = getV<DPOL>(Particles_bulk);
+        auto dPol_boundary = getV<DPOL>(Particles_boundary);
         auto FranckEnergyDensity = getV<FE>(Particles);
         auto Pol_old = getV<POLD>(Particles);
         auto f5 = getV<F5>(Particles);
@@ -388,11 +412,12 @@ struct CalcVelocity
                 auto p_out = CorrVec.get<0>(j)[0];
                 auto p = CorrVec.get<0>(j)[1];
                 //std::cout<<p<<":"<<CorrMap[p].getKey()<<" at: "<<v_cl.rank()<<std::endl;
-                Particles.getProp<0>(p_out)=Particles.getProp<0>(p);
+                Particles.getProp<0>(p)=Particles.getProp<0>(p_out);
+                Particles.getProp<F3>(p)=Particles.getProp<F3>(p_out);
             }
             Particles.ghost_get<POLARIZATION>(SKIP_LABELLING);
             //auto & Bulk = Particles_bulk.getIds();
-            Point<2,double> Xpn,xpd1={5.,5.};
+            Point<2,double> Xpn,X2pn,xpd1={5.,5.};
             for (int s=0; s<bulk.size(); s++){
               auto p = bulk.get<0>(s);
               Xpn={Particles.getPos(p)[0],Particles.getPos(p)[1]};
@@ -407,6 +432,20 @@ struct CalcVelocity
               double norm = sqrt(x1*x1 + x2*x2) * sqrt(p1*p1 + p2*p2);
               Particles.getProp<F3>(s) = acos(scalar/norm);
             }
+            // for (int l=0; l<boundary.size(); l++){
+            //   auto q = boundary.get<0>(t);
+            //   X2pn={Particles.getPos(q)[0],Particles.getPos(q)[1]};
+            //   double dist=X2pn.distance(xpd1);
+            //   dist = (dist == 0) ? 1 : dist;
+            //   double q1 = Particles.getProp<POLARIZATION>(l)[x];
+            //   double q2 = Particles.getProp<POLARIZATION>(l)[y];
+            //   //compute normal
+            //   double x1 = (6. - Xpn[0])/dist;
+            //   double x2 = (6. - Xpn[1])/dist;
+            //   double scalar = x1 * q1 + x2 * q2;
+            //   double norm = sqrt(x1*x1 + x2*x2) * sqrt(q1*q1 + q2*q2);
+            //   Particles.getProp<F3>(l) = acos(scalar/norm);
+            // }
         }
         if (v_cl.rank() == 0) {
             std::cout << "dt for the stepper is " << t-t_old << " Time Taken: "<<gt.getwct()
@@ -420,10 +459,10 @@ struct CalcVelocity
         }
         ctr++;
 
-        dPol[x]=Pol[x]-Pol_old[x];
-        dPol[y]=Pol[y]-Pol_old[y];
-
-        //f6 = FranckEnergyDensity;
+        dPol[x]=Pol[x];//-Pol_old[x];
+        dPol[y]=Pol[y];//-Pol_old[y];
+        // dPol_boundary[x]=0;
+        // dPol_boundary[y]=0;
 
         std::vector<double> fes;
         int ctr2 = 0;
@@ -441,6 +480,7 @@ struct CalcVelocity
         std::cout << "v_cl_rank = " << v_cl.rank() << '\n';
         std::cout << "FEsum_new = " << sum2 << '\n';
         std::cout << "angle = " << anglesum << '\n';
+        avangle.push_back(anglesum);
         bool minimum;
         for (int i=0; i<fes.size();i++){if(sum2<fes[i]){minimum=true;}}
         if (minimum && ctr >100 && fabs(anglesum_old-anglesum)<=steady_tol) {
@@ -452,34 +492,6 @@ struct CalcVelocity
             openfpm_finalize();
             exit(0);
         }
-
-        // std::cout << "v_cl_rank = " << v_cl.rank() << '\n';
-        // double MaxRateOfChange=0;
-        // for (int j = 0; j < bulk.size(); j++) {
-        //     auto p = bulk.get<0>(j);
-        //     for (int i=0;i<2;i++){
-        //         if(fabs((Particles.getProp<DPOL>(p)[i]))>MaxRateOfChange)
-        //         {
-        //             MaxRateOfChange=fabs(Particles.getProp<DPOL>(p)[i]);
-        //         }
-        //     }
-        // }
-        // v_cl.max(MaxRateOfChange);
-        // v_cl.execute();
-        // if(v_cl.rank()==0)
-        // {std::cout<<"MaxRateOfChange: "<<MaxRateOfChange<<std::endl;
-        // }
-        // if(MaxRateOfChange<steady_tol && ctr>5)
-        // {
-        //     tt2.stop();
-        //     if(v_cl.rank()==0)
-        //     {std::cout<<"Steady State Reached."<<std::endl;
-        //     std::cout << "The simulation took " << tt2.getcputime() << "(CPU) ------ " << tt2.getwct()
-        //               << "(Wall) Seconds.";}
-        //
-        //     openfpm_finalize();
-        //     exit(0);
-        // }
 
         if (v_cl.rank()==0)
         {
@@ -494,8 +506,9 @@ struct CalcVelocity
         Pol_old = Pol;
         dPol=0;
         t_old=t;
-        state.data.get<0>()=Pol[x];
-        state.data.get<1>()=Pol[y];
+
+        // state.data.get<0>()=Pol[x];
+        // state.data.get<1>()=Pol[y];
 
         gt.start();
     }
@@ -504,7 +517,7 @@ struct CalcVelocity
 int main(int argc, char* argv[])
 {
     {   openfpm_init(&argc,&argv);
-
+        std::ofstream AvAngle("avangle.txt");
         auto &v_cl = create_vcluster();
 
         tt2.start();
@@ -513,7 +526,7 @@ int main(int argc, char* argv[])
         double dt = tf/std::atof(argv[3]);
         wr_f=int(std::atof(argv[3]));
         wr_at=int(std::atof(argv[4]));
-        V_err_eps = 1e-5; //chnge dependent of Gd
+        V_err_eps =1e-10; //chnge dependent of Gd
         //give dimensionless value for activity as 5th value to program
         zetadelmu = double(std::atof(argv[5]));
         //give dimensionless value for slpay/bend as 6th value to program
@@ -592,9 +605,15 @@ int main(int argc, char* argv[])
 
         size_t pctr=1;
         vector_dist_subset<2, double, Activegels> Particles_bulk(Particles,0);
+
         //auto f3 = getV<F3>(Particles);
         //Neumann Boundary Conditions: set angle for beginning: Neumann BC imposed by CorrVec.
         auto & Bulk = Particles_bulk.getIds();
+        //auto & Boundary = Particles_boundary.getIds();
+        double max = 0.3;
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<> dis(0.0, max);
         for (int j = 0; j < Bulk.size(); j++) {
             auto p = Bulk.get<0>(j);
             Xpn={Particles.getPos(p)[0],Particles.getPos(p)[1]};
@@ -608,6 +627,14 @@ int main(int argc, char* argv[])
             Particles.getProp<POLARIZATION>(p)[x] = cos(phi)*x1 - sin(phi)*x2;
             Particles.getProp<POLARIZATION>(p)[y] = sin(phi)*x1 + cos(phi)*x2;
             Particles.getProp<F3>(p) = phi;
+
+            if (Particles.getProp<PID>(p)==0){
+              double v = (dis(gen) - (max/2.)) * M_PI;
+              Particles_bulk.getProp<POLARIZATION>(p)[x] = cos(v)*Particles_bulk.getProp<POLARIZATION>(p)[x] - sin(v)*Particles_bulk.getProp<POLARIZATION>(p)[y];
+              Particles_bulk.getProp<POLARIZATION>(p)[y] = sin(v)*Particles_bulk.getProp<POLARIZATION>(p)[x] + cos(v)*Particles_bulk.getProp<POLARIZATION>(p)[y];
+              Particles.getProp<F3>(p) = phi+v;
+            }
+
             //std::cout << "phi = "<< phi << '\n';
             if (Particles.getProp<PID>(p)!=0){
                 double x = Xpn[0];
@@ -619,16 +646,41 @@ int main(int argc, char* argv[])
                 Particles.getLastSubset(1);
                 Particles.getLastProp<0>()[0] = Particles.getProp<0>(p)[0];
                 Particles.getLastProp<0>()[1] = Particles.getProp<0>(p)[1];
+                // Particles.getProp<0>(p)[0] = Particles.getLastProp<0>()[0];
+                // Particles.getProp<0>(p)[1] = Particles.getLastProp<0>()[1];
+                Particles.getLastProp<F3>() = Particles.getProp<F3>(p);
                 Particles.getLastProp<PID>() = pctr;
                 Particles.getProp<PID>(p) = pctr;
                 pctr++;
             }
         }
+
+        // for (int l =0; l<boundary.size(); l++){
+        //   Particles.getProp<F3>()
+        // }
         //Particles.map();
+        vector_dist_subset<2, double, Activegels> Particles_boundary(Particles, 1);
         Particles.ghost_get<0,12,DELMU,NORMAL>();
         Particles.ghost_get<F3>();
         //Particles_bulk.update();
-        vector_dist_subset<2, double, Activegels> Particles_boundary(Particles,1);
+        //insert randomness to angle -> not already start with steady state
+        //vector_dist_subset<2, double, Activegels> Particles_boundary(Particles,1);
+        auto & bulk = Particles_bulk.getIds();
+        auto & boundary = Particles_boundary.getIds();
+        //
+        //
+        // for (int l = 0; l < bulk.size(); l++){
+        //   double v = (dis(gen) - (max/2.)) * M_PI;
+        //   Particles_bulk.getProp<POLARIZATION>(l)[x] = cos(v)*Particles_bulk.getProp<POLARIZATION>(l)[x] - sin(v)*Particles_bulk.getProp<POLARIZATION>(l)[y];
+        //   Particles_bulk.getProp<POLARIZATION>(l)[y] = sin(v)*Particles_bulk.getProp<POLARIZATION>(l)[x] + cos(v)*Particles_bulk.getProp<POLARIZATION>(l)[y];
+        //   //Particles_boundary.getProp<F3>(l) = Particles_boundary.getProp<F3>(l) + v;
+        //   // auto p = Bulk.get<0>(l);
+        //   // if (Particles.getProp<PID>(p)!=0){
+        //   //   Particles.getLastProp<F3>() = Particles.getProp<F3>(p);
+        //   // }
+        // }
+        Particles.ghost_get<POLARIZATION, F3>(SKIP_LABELLING);
+
 
         //auto Pos = getV<PROP_POS>(Particles);
 
@@ -653,15 +705,11 @@ int main(int argc, char* argv[])
 
         Particles.ghost_get<POLARIZATION,NORMAL,DELMU,DPOL, F3>(SKIP_LABELLING);
 
-        auto & bulk = Particles_bulk.getIds();
-        auto & boundary = Particles_boundary.getIds();
-
 
         // now link the partners of boundary and bulk
         //before PID for both particles at same time, bt still need to iterate, bc jusr to find partners
         //find or access single particles -> CorrVec
         CorrVec.clear();
-
         for(int i = 0; i < bulk.size(); i++)
         {
                 auto p = bulk.get<0>(i); //0 for id by convention
@@ -684,35 +732,37 @@ int main(int argc, char* argv[])
         auto P_bulk = getV<PRESSURE>(Particles_bulk);//Pressure only on inside
         auto Pol_bulk = getV<POLARIZATION>(Particles_bulk);
         auto dPol_bulk = getV<DPOL>(Particles_bulk);
+        auto dPol_boundary = getV<DPOL>(Particles_boundary);
         auto dV_bulk = getV<DV>(Particles_bulk);
+        auto RHS_all = getV<VRHS>(Particles);
         auto RHS_bulk = getV<VRHS>(Particles_bulk);
         auto div_bulk = getV<DIV>(Particles_bulk);
 
 
-        //insert randomness to angle -> not already start with steady state
-        double max = 0.2;
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_real_distribution<> dis(0.0, max);
-
-        for (int k = 0; k<boundary.size(); k++){
-          double s = (dis(gen) - (max/2.)) * M_PI;
-          Particles_boundary.getProp<POLARIZATION>(k)[x] = cos(s)*Particles_boundary.getProp<POLARIZATION>(k)[x] - sin(s)*Particles_boundary.getProp<POLARIZATION>(k)[y];
-          Particles_boundary.getProp<POLARIZATION>(k)[y] = sin(s)*Particles_boundary.getProp<POLARIZATION>(k)[x] + cos(s)*Particles_boundary.getProp<POLARIZATION>(k)[y];
-
-        }
-        for (int l = 0; l < bulk.size(); l++){
-          double v = (dis(gen) - (max/2.)) * M_PI;
-          Particles_bulk.getProp<POLARIZATION>(l)[x] = cos(v)*Particles_bulk.getProp<POLARIZATION>(l)[x] - sin(v)*Particles_bulk.getProp<POLARIZATION>(l)[y];
-          Particles_bulk.getProp<POLARIZATION>(l)[y] = sin(v)*Particles_bulk.getProp<POLARIZATION>(l)[x] + cos(v)*Particles_bulk.getProp<POLARIZATION>(l)[y];
-          //Particles_boundary.getProp<F3>(l) = Particles_boundary.getProp<F3>(l) + v;
-        }
-        //Particles.ghost_get<F3>();
+        // //insert randomness to angle -> not already start with steady state
+        // double max = 0.2;
+        // std::random_device rd;
+        // std::mt19937 gen(rd());
+        // std::uniform_real_distribution<> dis(0.0, max);
+        //
+        // for (int k = 0; k<boundary.size(); k++){
+        //   double s = (dis(gen) - (max/2.)) * M_PI;
+        //   Particles_boundary.getProp<POLARIZATION>(k)[x] = cos(s)*Particles_boundary.getProp<POLARIZATION>(k)[x] - sin(s)*Particles_boundary.getProp<POLARIZATION>(k)[y];
+        //   Particles_boundary.getProp<POLARIZATION>(k)[y] = sin(s)*Particles_boundary.getProp<POLARIZATION>(k)[x] + cos(s)*Particles_boundary.getProp<POLARIZATION>(k)[y];
+        //
+        // }
+        // for (int l = 0; l < bulk.size(); l++){
+        //   double v = (dis(gen) - (max/2.)) * M_PI;
+        //   Particles_bulk.getProp<POLARIZATION>(l)[x] = cos(v)*Particles_bulk.getProp<POLARIZATION>(l)[x] - sin(v)*Particles_bulk.getProp<POLARIZATION>(l)[y];
+        //   Particles_bulk.getProp<POLARIZATION>(l)[y] = sin(v)*Particles_bulk.getProp<POLARIZATION>(l)[x] + cos(v)*Particles_bulk.getProp<POLARIZATION>(l)[y];
+        //   //Particles_boundary.getProp<F3>(l) = Particles_boundary.getProp<F3>(l) + v;
+        // }
+        // //Particles.ghost_get<F3>();
 
         Particles.write("Init");
 
-        Derivative_x Dx(Particles,ord,rCut,3.1,support_options::RADIUS);
-        Derivative_y Dy(Particles, ord, rCut,3.1,support_options::RADIUS);
+        Derivative_x Dx(Particles,ord,rCut,1.9,support_options::RADIUS), Bulk_Dx(Particles_bulk,ord,rCut); //was 3.1 instead of 1.9 before
+        Derivative_y Dy(Particles, ord, rCut,1.9,support_options::RADIUS), Bulk_Dy(Particles_bulk,ord,rCut); // -''-
         Derivative_xy Dxy(Particles, ord, rCut,1.9,support_options::RADIUS);
         auto Dyx = Dxy;
         Derivative_xx Dxx(Particles, ord, rCut,1.9,support_options::RADIUS);
@@ -726,7 +776,7 @@ int main(int argc, char* argv[])
         vectorGlobal_bulk=(void *) &Particles_bulk;
         vectorGlobal_boundary=(void *) &Particles_boundary;
 
-        PolarEv<Derivative_x,Derivative_y,Derivative_xx,Derivative_xy,Derivative_yy> System(Dx,Dy,Dxx,Dxy,Dyy);
+        PolarEv<Derivative_x,Derivative_y,Derivative_xx,Derivative_xy,Derivative_yy> System(Dx,Dy,Dxx,Dxy,Dyy, Bulk_Dx, Bulk_Dy);
         CalcVelocity<Derivative_x,Derivative_y,Derivative_xx,Derivative_xy,Derivative_yy> CalcVelocityObserver(Dx,Dy,Dxx,Dxy,Dyy);
 
         state_type_2d_ofp tPol;
@@ -738,7 +788,8 @@ int main(int argc, char* argv[])
         vy.setId(1);
         timer tt;
         timer tt3;
-        dPol = Pol;
+        dPol_bulk = Pol_bulk;
+        dPol_boundary = 0;
         double V_err = 1, V_err_old;
         double tim=0;
 
@@ -746,13 +797,16 @@ int main(int argc, char* argv[])
         std::vector<double> inter_times;
         size_t steps;
 
-        steps=boost::numeric::odeint::integrate_adaptive(boost::numeric::odeint::make_controlled(1e-6,1e-6,abmA),System,tPol,tim,tf,dt,CalcVelocityObserver);
+        steps=boost::numeric::odeint::integrate_adaptive(boost::numeric::odeint::make_controlled(1e-8,1e-7,abmA),System,tPol,tim,tf,dt,CalcVelocityObserver);
         //steps=boost::numeric::odeint::integrate_const(euler,System,tPol,tim,tf,dt,CalcVelocityObserver);
 
         std::cout << "Time steps: " << steps << std::endl;
 
+
         Pol_bulk[x]=tPol.data.get<0>();
         Pol_bulk[y]=tPol.data.get<1>();
+        // Pol_boundary[x]=Pol_boundary[x];
+        // Pol_boundary[y]=Pol_boundary[y];
 
         Particles.deleteGhost();
         Particles.write("Polar_Last");
@@ -767,6 +821,8 @@ int main(int argc, char* argv[])
             std::cout << "The simulation took " << tt2.getcputime() << "(CPU) ------ " << tt2.getwct()
                       << "(Wall) Seconds.";
         }
+        for (const auto &e : avangle) AvAngle << e << "\n";
+        AvAngle.close();
     }
     openfpm_finalize();
 }
