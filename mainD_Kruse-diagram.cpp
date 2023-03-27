@@ -15,16 +15,16 @@
 
 constexpr int x = 0;
 constexpr int y = 1;
-constexpr int POLARIZATION= 0,VELOCITY = 1, VORTICITY = 2, NORMAL = 3,PRESSURE = 4, STRAIN_RATE = 5, STRESS = 6, MOLFIELD = 7, DPOL = 8, DV = 9, VRHS = 10, F1 = 11, F2 = 12, F3 = 13, F4 = 14, F5 = 15, F6 = 16, V_T = 17, DIV = 18, DELMU = 19, HPB = 20, FE = 21, R = 22, PID = 23, POLD = 24;
+constexpr int POLARIZATION= 0,VELOCITY = 1, VORTICITY = 2, NORMAL = 3,PRESSURE = 4, STRAIN_RATE = 5, STRESS = 6, MOLFIELD = 7, DPOL = 8, DV = 9, VRHS = 10, F1 = 11, F2 = 12, F3 = 13, F4 = 14, F5 = 15, F6 = 16, V_T = 17, DIV = 18, DELMU = 19, HPB = 20, FE = 21, R = 22, PID = 23, POLD = 24, PROLD = 25;
 
 
-double eta = 10.0;
+double eta = 15.0;
 double nu = 3.0;
-double gama = 10.0;
+double gama = 15.0;
 double zeta = -1.0;
-double lambda = .0;
-double Ks = 1.0;
-double chi2 = -5.;
+double lambda = 3.0;
+double Ks = 5.0;
+double chi2 = -.2;
 double chi4 = -chi2/2.;
 double k = .0;
 double zetadelmu;
@@ -47,8 +47,8 @@ double steady_tol=1e-10;
 
 void *vectorGlobal=nullptr,*vectorGlobal_bulk=nullptr,*vectorGlobal_boundary=nullptr;
 const openfpm::vector<std::string>
-PropNAMES={"00-Polarization","01-Velocity","02-Vorticity","03-Normal","04-Pressure","05-StrainRate","06-Stress","07-MolecularField","08-DPOL","09-DV","10-VRHS","11-f1","12-f2","13-f3","14-f4","15-f5","16-f6","17-V_T","18-DIV","19-DELMU","20-HPB","21-FrankEnergy","22-R","23-particleID","24-P_old"};
-typedef aggregate<VectorS<2, double>,VectorS<2, double>,double[2][2],VectorS<2, double>,double,double[2][2],double[2][2],VectorS<2, double>,VectorS<2, double>,VectorS<2, double>,VectorS<2, double>,double,double,double,double,double,double,VectorS<2, double>,double,double,double,double,double,int,VectorS<2, double>> Activegels;
+PropNAMES={"00-Polarization","01-Velocity","02-Vorticity","03-Normal","04-Pressure","05-StrainRate","06-Stress","07-MolecularField","08-DPOL","09-DV","10-VRHS","11-f1","12-f2","13-f3","14-f4","15-f5","16-f6","17-V_T","18-DIV","19-DELMU","20-HPB","21-FrankEnergy","22-R","23-particleID","24-P_old", "25Pr_old"};
+typedef aggregate<VectorS<2, double>,VectorS<2, double>,double[2][2],VectorS<2, double>,double,double[2][2],double[2][2],VectorS<2, double>,VectorS<2, double>,VectorS<2, double>,VectorS<2, double>,double,double,double,double,double,double,VectorS<2, double>,double,double,double,double,double,int,VectorS<2, double>,VectorS<2, double>> Activegels;
 typedef vector_dist_ws<2, double,Activegels> vector_type;
 typedef vector_dist_subset<2, double, Activegels> vector_type2;
 
@@ -110,6 +110,7 @@ struct PolarEv
         //auto g = getV<NORMAL>(Particles);
         auto P = getV<PRESSURE>(Particles);
         auto P_bulk = getV<PRESSURE>(Particles_bulk);
+        auto Pr_old = getV<PROLD>(Particles);
         auto RHS = getV<VRHS>(Particles);
         auto RHS_bulk = getV<VRHS>(Particles_bulk);
         auto div = getV<DIV>(Particles);
@@ -127,6 +128,8 @@ struct PolarEv
                 Particles.getProp<F3>(p) = Particles.getProp<F3>(p_out);
             }
         //Particles.ghost_get<0>(SKIP_LABELLING);
+        // Pol[x]=X.data.get<0>();
+        // Pol[y]=X.data.get<1>();
         Pol_bulk[x]=X.data.get<0>();
         Pol_bulk[y]=X.data.get<1>();
         Particles.ghost_get<POLARIZATION, F3>(SKIP_LABELLING);
@@ -135,56 +138,117 @@ struct PolarEv
         x_comp.setId(0);
         y_comp.setId(1);
 
-        int n = 0,nmax = 300,errctr = 0, Vreset = 0;
+        int n = 0,nmax = 10000,errctr = 0, Vreset = 0;
         double V_err = 1, V_err_old,sum, sum1;
         timer tt;
         tt.start();
         petsc_solver<double> solverPetsc;
-        solverPetsc.setSolver(KSPGMRES);
-        solverPetsc.setPreconditioner(PCJACOBI);
+        //solverPetsc.setSolver(KSPGMRES);
+        //solverPetsc.setPreconditioner(PCJACOBI);
         //solverPetsc.setPreconditioner(PCLU);
         // calculate erickson stress
-        sigma[x][x] = - Ks * Dx(Pol[x])*Dx(Pol[x]) - Ks * Dy(Pol[x])*Dx(Pol[y])
-                      + Kb * Dy(Pol[x])*Dx(Pol[y]) - Kb * Dx(Pol[y])*Dx(Pol[y])
-                      - k * Dx(Pol[x])
-                      ;
-        sigma[x][y] = - Ks * Dx(Pol[y])*Dx(Pol[x]) - Ks * Dy(Pol[y])*Dx(Pol[y])
-                      + Kb * Dx(Pol[y])*Dx(Pol[x]) - Kb * Dy(Pol[x])*Dx(Pol[x])
-                      - k * Dx(Pol[y])
-                      ;
-        sigma[y][x] = - Ks * Dx(Pol[x])*Dy(Pol[x]) - Ks * Dy(Pol[x])*Dy(Pol[y])
-                      + Kb * Dy(Pol[x])*Dy(Pol[y]) - Kb * Dx(Pol[y])*Dy(Pol[y])
-                      - k  * Dy(Pol[x])
-                      ;
-        sigma[y][y] = - Ks * Dx(Pol[y])*Dy(Pol[x]) - Ks * Dy(Pol[y])*Dy(Pol[y])
-                      + Kb * Dx(Pol[y])*Dy(Pol[x]) - Kb * Dy(Pol[x])*Dy(Pol[x])
-                      - k * Dy(Pol[y])
-                      ;
+        // sigma[x][x] = - Ks * Dx(Pol[x])*Dx(Pol[x]) - Ks * Dy(Pol[y])*Dx(Pol[x])
+        //               + Kb * Dy(Pol[x])*Dx(Pol[y]) - Kb * Dx(Pol[y])*Dx(Pol[y])
+        //               - k * Dx(Pol[x])
+        //               ;
+        // sigma[x][y] = - Ks * Dy(Pol[y])*Dx(Pol[y]) - Ks * Dx(Pol[x])*Dx(Pol[y])
+        //               + Kb * Dx(Pol[y])*Dx(Pol[x]) - Kb * Dy(Pol[x])*Dx(Pol[x])
+        //               - k * Dx(Pol[y])
+        //               ;
+        // sigma[y][x] = - Ks * Dx(Pol[x])*Dy(Pol[x]) - Ks * Dy(Pol[y])*Dy(Pol[x])
+        //               + Kb * Dy(Pol[x])*Dy(Pol[y]) - Kb * Dx(Pol[y])*Dy(Pol[y])
+        //               - k  * Dy(Pol[x])
+        //               ;
+        // sigma[y][y] = - Ks * Dx(Pol[x])*Dy(Pol[y]) - Ks * Dy(Pol[y])*Dy(Pol[y])
+        //               + Kb * Dx(Pol[y])*Dy(Pol[x]) - Kb * Dy(Pol[x])*Dy(Pol[x])
+        //               - k * Dy(Pol[y])
+        //               ;
+        // sigma[x][x] = - Ks * Dx(Pol[x])*Dx(Pol[x]) - Ks * Dy(Pol[x])*Dx(Pol[y])
+        //               + Kb * Dy(Pol[x])*Dx(Pol[y]) - Kb * Dx(Pol[y])*Dx(Pol[y])
+        //               - k * Dx(Pol[x])
+        //               ;
+        // sigma[x][y] = - Ks * Dx(Pol[y])*Dx(Pol[x]) - Ks * Dy(Pol[y])*Dx(Pol[y])
+        //               + Kb * Dx(Pol[y])*Dx(Pol[x]) - Kb * Dy(Pol[x])*Dx(Pol[x])
+        //               - k * Dx(Pol[y])
+        //               ;
+        // sigma[y][x] = - Ks * Dx(Pol[x])*Dy(Pol[x]) - Ks * Dy(Pol[x])*Dy(Pol[y])
+        //               + Kb * Dy(Pol[x])*Dy(Pol[y]) - Kb * Dx(Pol[y])*Dy(Pol[y])
+        //               - k  * Dy(Pol[x])
+        //               ;
+        // sigma[y][y] = - Ks * Dx(Pol[y])*Dy(Pol[x]) - Ks * Dy(Pol[y])*Dy(Pol[y])
+        //               + Kb * Dx(Pol[y])*Dy(Pol[x]) - Kb * Dy(Pol[x])*Dy(Pol[x])
+        //               - k * Dy(Pol[y])
+        //               ;
+
+        //erickson stress from Ramaswamy paper, same as above
+        sigma[x][x] = - Ks * Dx(Pol[x]) * Dx(Pol[x]) - Ks * Dy(Pol[x]) * Dx(Pol[y])
+                      - Kb * Dx(Pol[y]) * Dx(Pol[y]) + Kb * Dy(Pol[x]) * Dx(Pol[y]);
+        sigma[x][y] = - Ks * Dy(Pol[y]) * Dx(Pol[y]) - Ks * Dx(Pol[y]) * Dx(Pol[x])
+                      - Kb * Dy(Pol[x]) * Dx(Pol[x]) + Kb * Dx(Pol[y]) * Dx(Pol[x]);
+        sigma[y][x] = - Ks * Dx(Pol[x]) * Dy(Pol[x]) - Ks * Dy(Pol[x]) * Dy(Pol[y])
+                      - Kb * Dx(Pol[y]) * Dy(Pol[y]) + Kb * Dy(Pol[x]) * Dy(Pol[y]);
+        sigma[y][y] = - Ks * Dy(Pol[y]) * Dy(Pol[x]) - Ks * Dx(Pol[y]) * Dy(Pol[x])
+                      - Kb * Dy(Pol[x]) * Dy(Pol[x]) + Kb * Dx(Pol[y]) * Dy(Pol[x]);
+
+
         Particles.ghost_get<STRESS>(SKIP_LABELLING);
 
         Particles.deleteGhost();
         Particles.write_frame("PolarTest",1);
-        Particles.ghost_get<POLARIZATION>();
 
 
         // calulate FranckEnergyDensity
-        FranckEnergyDensity = (Ks/2.0) * ((Dx(Pol[x]) * Dx(Pol[x])) +
-                              (Dy(Pol[y]) * Dy(Pol[y])) + 2. * Dx(Pol[y]) * Dy(Pol[x])) +
-                              (Kb/2.0) * ((Dx(Pol[y]))*(Dx(Pol[y])) - 2. * (Dx(Pol[y]))*(Dy(Pol[x])) + (Dy(Pol[x]))*(Dy(Pol[x])) ) +
-                              chi2/2. * (Pol[x] * Pol[x] + Pol[y] * Pol[y]) +
-                              chi4/2. * (Pol[x] * Pol[x] * Pol[x] * Pol[x] + Pol[y] * Pol[y] * Pol[y] * Pol[y] + 2 * Pol[x] * Pol[x] * Pol[y] * Pol[y])
+        // FranckEnergyDensity = (Ks/2.0) * ((Dx(Pol[x]) * Dx(Pol[x])) +
+        //                         (Dy(Pol[y]) * Dy(Pol[y])) + 2. * Dx(Pol[x]) * Dy(Pol[y])) +
+        //                       (Kb/2.0) * ((Dx(Pol[y]))*(Dx(Pol[y]))
+        //                         - 2. * (Dx(Pol[y]))*(Dy(Pol[x]))
+        //                         + (Dy(Pol[x]))*(Dy(Pol[x])) ) +
+        //                       chi2/2. * (Pol[x] * Pol[x] + Pol[y] * Pol[y]) +
+        //                       chi4/4. * (Pol[x] * Pol[x] * Pol[x] * Pol[x] + Pol[y] * Pol[y] * Pol[y] * Pol[y] + 2 * Pol[x] * Pol[x] * Pol[y] * Pol[y])
+        //                       + k * (Dx(Pol[x]) + Dy(Pol[y]))
+        //                       ;
+        // FranckEnergyDensity = (Ks/2.0) * ((Dx(Pol[x]) * Dx(Pol[x])) +
+        //                       (Dy(Pol[y]) * Dy(Pol[y])) + 2. * Dx(Pol[y]) * Dy(Pol[x])) +
+        //                       (Kb/2.0) * ((Dx(Pol[y]))*(Dx(Pol[y])) - 2. * (Dx(Pol[y]))*(Dy(Pol[x])) + (Dy(Pol[x]))*(Dy(Pol[x])) ) +
+        //                       chi2/2. * (Pol[x] * Pol[x] + Pol[y] * Pol[y]) +
+        //                       chi4/2. * (Pol[x] * Pol[x] * Pol[x] * Pol[x] + Pol[y] * Pol[y] * Pol[y] * Pol[y] + 2 * Pol[x] * Pol[x] * Pol[y] * Pol[y])
+        //                       + k * (Dx(Pol[x]) + Dy(Pol[y]))
+        //                       ;
+        FranckEnergyDensity = (Ks/2.) * ((Dx(Pol[x]) * Dx(Pol[x]))
+                              + (Dy(Pol[y]) * Dy(Pol[y]))
+                              + (Dx(Pol[y]) * Dx(Pol[y]))
+                              + (Dy(Pol[x]) * Dy(Pol[x])))
+                              - ((Kb-Ks)/2.) * ((Dy(Pol[x]) * Dy(Pol[x]))
+                              + (Dx(Pol[y]) * Dx(Pol[y]))
+                              - 2. * Dy(Pol[x]) * Dx(Pol[y]))
+                              + chi2/2. * (Pol[x] * Pol[x] + Pol[y] * Pol[y])
+                              + chi4/2. * (Pol[x] * Pol[x] * Pol[x] * Pol[x] + Pol[y] * Pol[y] * Pol[y] * Pol[y] + 2 * Pol[x] * Pol[x] * Pol[y] * Pol[y])
                               + k * (Dx(Pol[x]) + Dy(Pol[y]))
                               ;
         Particles.ghost_get<FE>(SKIP_LABELLING);
 
 
+        // f1 = Kb * Dyy(Pol[x]) - Kb * Dyx(Pol[y]) +
+        //      Ks * Dxx(Pol[x]) + Ks * Dyx(Pol[y]) -
+        //      (chi2 * Pol[x] + chi4 * Pol[x] * Pol[x] * Pol[x] + chi4 * Pol[y] * Pol[y] * Pol[x]);
+        // f2 = Kb * Dxx(Pol[y]) - Kb * Dxy(Pol[x]) +
+        //      Ks * Dyy(Pol[y]) + Ks * Dxy(Pol[x]) -
+        //      (chi2 * Pol[y] + chi4 * Pol[y] * Pol[y] * Pol[y] + chi4 * Pol[x] * Pol[x] * Pol[y]);
 
-        f1 = Kb * Dyy(Pol[x]) - Kb * Dyx(Pol[y]) +
-             Ks * Dxx(Pol[x]) + Ks * Dyx(Pol[y]) -
-             (chi2 * Pol[x] + 2. * chi4 * Pol[x] * Pol[x] * Pol[x] + 2. * chi4 * Pol[y] * Pol[y] * Pol[x]);
-        f2 = Kb * Dxx(Pol[y]) - Kb * Dxy(Pol[x]) +
-             Ks * Dyy(Pol[y]) + Ks * Dxy(Pol[x]) -
-             (chi2 * Pol[y] + 2. * chi4 * Pol[y] * Pol[y] * Pol[y] + 2. * chi4 * Pol[x] * Pol[x] * Pol[y]);
+        // f1 = Kb * Dyy(Pol[x]) - Kb * Dyx(Pol[y]) +
+        //      Ks * Dxx(Pol[x]) + Ks * Dyx(Pol[y]) -
+        //      (chi2 * Pol[x] + 2. * chi4 * Pol[x] * Pol[x] * Pol[x] + 2. * chi4 * Pol[y] * Pol[y] * Pol[x]);
+        // f2 = Kb * Dxx(Pol[y]) - Kb * Dxy(Pol[x]) +
+        //      Ks * Dyy(Pol[y]) + Ks * Dxy(Pol[x]) -
+        //      (chi2 * Pol[y] + 2. * chi4 * Pol[y] * Pol[y] * Pol[y] + 2. * chi4 * Pol[x] * Pol[x] * Pol[y]);
+
+        //try other equation for h_x and h_y
+        f1 = (chi2 * Pol[x] + 2. * chi4 * Pol[x] * Pol[x] * Pol[x] + 2. * chi4 * Pol[y] * Pol[y] * Pol[x])
+            + Ks * (Dxx(Pol[x]) + 2. * Dyy(Pol[x]) - Dyx(Pol[y]))
+            + Kb * (Dyx(Pol[y]) - Dyy(Pol[x]));
+        f2 = (chi2 * Pol[y] + 2. * chi4 * Pol[y] * Pol[y] * Pol[y] + 2. * chi4 * Pol[x] * Pol[x] * Pol[y])
+            + Ks * (Dyy(Pol[y]) + 2. * Dxx(Pol[y]) - Dyx(Pol[x]))
+            + Kb * (Dxy(Pol[x]) - Dxx(Pol[y]));
 
         Particles.ghost_get<F1, F2>(SKIP_LABELLING);
         texp_v<double> Dxf1 = Dx(f1),Dxf2 = Dx(f2), Dyf1 = Dy(f1), Dyf2 = Dy(f2);
@@ -212,7 +276,7 @@ struct PolarEv
                           + f1 * Dx(Pol[y]) + Pol[y] * Dxf1
                           + f2 * Dx(Pol[x]) + Pol[x] * Dxf2);
 
-
+        Particles.ghost_get<DV>(SKIP_LABELLING);
         //calculate LHS
         auto Stokes1 = eta * Dxx(V[x]) + eta * Dyy(V[x]);
         auto Stokes2 = eta * Dxx(V[y]) + eta * Dyy(V[y]);
@@ -229,12 +293,14 @@ struct PolarEv
             P = 0;
             Vreset = 0;
         }
-        //P=0;
+        P=0;
 
         // integrate velocity
         Particles.ghost_get<PRESSURE>(SKIP_LABELLING);
-        RHS[x] = dV[x] + Bulk_Dx(P);
-        RHS[y] = dV[y] + Bulk_Dy(P);
+        RHS_bulk[x] = dV[x] + Bulk_Dx(P);
+        RHS_bulk[y] = dV[y] + Bulk_Dy(P);
+        // RHS[x] = dV[x] + Dx(P);
+        // RHS[y] = dV[y] + Dy(P);
         Particles.ghost_get<VRHS>(SKIP_LABELLING);
 
         // prepare solver
@@ -250,31 +316,73 @@ struct PolarEv
         div = -(Dx(V[x]) + Dy(V[y]));
         //std::cout << "div =" << Particles.getProp<DIV>(1) << '\n';
         //std::cout << "V = " << Particles.getProp<VELOCITY>(1)[0] << '\n';
-        P = P + 1e-6*div;
+        P_bulk = P + 1*div;
+        Particles.ghost_get<PRESSURE>(SKIP_LABELLING);
         //P_bulk = P + 0.00001*div;
 
+        double P_err = 1.;
+        double P_err_old;
+        double P_err_eps = 1e-14;
+        double divsum=1;
         // approximate velocity
-        while (V_err >= V_err_eps && n <= nmax) {
+        //while ((V_err >= V_err_eps || P_err >=P_err_eps) && n <= nmax) {
+        while ((V_err >= V_err_eps) && n <= nmax) {
             Vbdry=0;
             dVbdry =0;
-            Particles.ghost_get<PRESSURE>(SKIP_LABELLING);
             //pressure correction
-            RHS[x] = dV[x] + Dx(P);
-            RHS[y] = dV[y] + Dy(P);
+            // RHS[x] = dV[x] + Dx(P);
+            // RHS[y] = dV[y] + Dy(P);
+            RHS_bulk[x] = dV[x] + Bulk_Dx(P);
+            RHS_bulk[y] = dV[y] + Bulk_Dy(P);
             Particles.ghost_get<VRHS>(SKIP_LABELLING);
             Solver.reset_b();
             Solver.impose_b(bulk, RHS[0], x_comp); //update b Seite von Gleichung
             Solver.impose_b(bulk, RHS[1], y_comp);
-
             Solver.impose_b(boundary, 0, x_comp);
             Solver.impose_b(boundary, 0, y_comp);
-            Solver.solve_with_solver_ig(solverPetsc, V[x], V[y]);
-
+            Solver.solve_with_solver_successive(solverPetsc, V[x], V[y]);
             Particles.ghost_get<VELOCITY>(SKIP_LABELLING);
             div = -(Dx(V[x]) + Dy(V[y]));
-            P = P + 1e-6*div;
+            P_bulk = P + 1*div;
+            divsum = 0;
+            for(int l=0; l<=bulk.size(); l++){
+              auto p = bulk.get<0>(l);
+              divsum += (Particles.getProp<DIV>(p));
+            }
+            v_cl.sum(divsum);
+            v_cl.execute();
+            //if (v_cl.rank()==0)
+            //{std::cout << "div = " <<  divsum << '\n';}
+            Particles.ghost_get<PRESSURE>(SKIP_LABELLING);
             //P_bulk = P + 0.00001*div;
             // calculate error
+
+            // double psum = 0;
+            // double psum1 = 0;
+            // for (int l = 0; k < bulk.size(); k++) {
+            //     auto p = bulk.get<0>(k);
+            //     psum += (Particles.getProp<PROLD>(p) - Particles.getProp<PRESSURE>(p)) *
+            //             (Particles.getProp<PROLD>(p) - Particles.getProp<PRESSURE>(p));
+            //     psum1 += Particles.getProp<PRESSURE>(p) * Particles.getProp<PRESSURE>(p);
+            // }
+            // Pr_old = P;
+            // Particles.ghost_get<PROLD>(SKIP_LABELLING);
+            // // std::cout << "V_t = " << Particles.getProp<V_T>(1)[0] << '\n';
+            // // std::cout << "V_t - V = " << Particles.getProp<V_T>(1)[0] - Particles.getProp<VELOCITY>(1)[0] << '\n';
+            // v_cl.sum(psum);
+            // v_cl.sum(psum1);
+            // v_cl.execute();
+            // psum = sqrt(psum);
+            // psum1 = sqrt(psum1);
+            // P_err_old = P_err;
+            // if (psum1==0){psum1 = 1;}else{psum1=psum1;}
+            // // std::cout << "sum = "<< sum << '\n';
+            // // std::cout << "sum1 = "<< sum1 << '\n';
+            // P_err = sum / sum1;
+            // std::cout << "P_err = " << P_err << '\n';
+
+
+
             sum = 0;
             sum1 = 0;
             for (int j = 0; j < bulk.size(); j++) {
@@ -287,30 +395,35 @@ struct PolarEv
                         Particles.getProp<VELOCITY>(p)[1] * Particles.getProp<VELOCITY>(p)[1];
             }
             V_t = V;
-            // std::cout << "V_t = " << Particles.getProp<V_T>(1)[0] << '\n';
+            Particles.ghost_get<V_T>(SKIP_LABELLING);
+            //std::cout << "V_t = " << Particles.getProp<V_T>(1)[0] << '\n';
             // std::cout << "V_t - V = " << Particles.getProp<V_T>(1)[0] - Particles.getProp<VELOCITY>(1)[0] << '\n';
             v_cl.sum(sum);
             v_cl.sum(sum1);
             v_cl.execute();
             sum = sqrt(sum);
             sum1 = sqrt(sum1);
+            V_err = sum / sum1;
+            if(v_cl.rank()==0)
+                {std::cout << "Relative Error = "<< V_err << '\n';}
+
             V_err_old = V_err;
-            //if (sum1==0){sum1 = 0;}else{sum1=sum1;}
+            //if (sum1==0){sum1 = 1;}else{sum1=sum1;}
             // std::cout << "sum = "<< sum << '\n';
             // std::cout << "sum1 = "<< sum1 << '\n';
-            V_err = sum / sum1;
+            //V_err = sum / sum1;
             //if (sum1 !=0) {V_err = sum / sum1;} else {V_err = 0;}
-            if (V_err > V_err_old || abs(V_err_old - V_err) < 1e-6) {
+            if (V_err > V_err_old){// || abs(V_err_old - V_err) < 1e-8) {
                 errctr++;
             } else {
                 errctr = 0;
             }
-            if (n > 3) {
-                if (errctr > 3) {
+            if (n > 6) {
+                if (errctr > 6) {
                     std::cout << "CONVERGENCE LOOP BROKEN DUE TO INCREASE/VERY SLOW DECREASE IN DIVERGENCE" << std::endl;
                     Vreset = 1;
                     break;
-                } else {
+                  } else {
                     Vreset = 0;
                 }
             }
@@ -318,7 +431,7 @@ struct PolarEv
         }
         tt.stop();
         if (v_cl.rank() == 0) {
-            std::cout << "Rel l2 cgs err in V = " << V_err << " and took " << tt.getwct() << " seconds with " << n
+            std::cout <<"Relative cgs error:"<<V_err<< ". Divergence = " << divsum << " and took " << tt.getwct() << " seconds with " << n
                       << " iterations."
                       << std::endl;
         }
@@ -406,8 +519,8 @@ struct CalcVelocity
 
         gt.stop();
         if (t != 0) {
-            Pol[x]=state.data.get<0>();
-            Pol[y]=state.data.get<1>();
+            // Pol[x]=state.data.get<0>();
+            // Pol[y]=state.data.get<1>();
             for (int j = 0; j < CorrVec.size(); j++) {
                 auto p_out = CorrVec.get<0>(j)[0];
                 auto p = CorrVec.get<0>(j)[1];
@@ -459,8 +572,8 @@ struct CalcVelocity
         }
         ctr++;
 
-        dPol[x]=Pol[x];//-Pol_old[x];
-        dPol[y]=Pol[y];//-Pol_old[y];
+        // dPol[x]=Pol[x];//-Pol_old[x];
+        // dPol[y]=Pol[y];//-Pol_old[y];
         // dPol_boundary[x]=0;
         // dPol_boundary[y]=0;
 
@@ -503,8 +616,8 @@ struct CalcVelocity
         anglesum_old = anglesum;
         anglesum =0.0;
         sum2 = 0.0;
-        Pol_old = Pol;
-        dPol=0;
+        // Pol_old = Pol;
+        // dPol=0;
         t_old=t;
 
         // state.data.get<0>()=Pol[x];
@@ -526,7 +639,6 @@ int main(int argc, char* argv[])
         double dt = tf/std::atof(argv[3]);
         wr_f=int(std::atof(argv[3]));
         wr_at=int(std::atof(argv[4]));
-        V_err_eps =1e-10; //chnge dependent of Gd
         //give dimensionless value for activity as 5th value to program
         zetadelmu = double(std::atof(argv[5]));
         //give dimensionless value for slpay/bend as 6th value to program
@@ -534,6 +646,8 @@ int main(int argc, char* argv[])
         //std::cout << "dkK = "<<dkK << '\n';
         //give f3 as 7th value for program
         double phi = M_PI*double(std::atof(argv[7]));
+        V_err_eps=std::atof(argv[8]); //chnge dependent of Gd
+        double timetol=std::atof(argv[9]);
         Kb = (dkK + 1.) * Ks;
         std::cout << "Kb = " << Kb << '\n';
         //calculate delmu from given parameter
@@ -610,7 +724,7 @@ int main(int argc, char* argv[])
         //Neumann Boundary Conditions: set angle for beginning: Neumann BC imposed by CorrVec.
         auto & Bulk = Particles_bulk.getIds();
         //auto & Boundary = Particles_boundary.getIds();
-        double max = 0.3;
+        double max = 0.1;
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_real_distribution<> dis(0.0, max);
@@ -618,10 +732,14 @@ int main(int argc, char* argv[])
             auto p = Bulk.get<0>(j);
             Xpn={Particles.getPos(p)[0],Particles.getPos(p)[1]};
             double dist=Xpn.distance(xpd1);
-            dist = (dist == 0) ? 1 : dist;
+            //dist = (dist == 0) ? 1 : dist;
             //compute normal
-            double x1 = (5. - Xpn[0])/dist;
-            double x2 = (5. - Xpn[1])/dist;
+            //double snormal = (1- 1/25 * dist * dist) * (exp(dist- 2.5));
+            //double snormal = (1/(pow(5, 3/2)) * pow(dist, 3/2));
+            double snormal = (1- 1/(1 + exp(2 * (dist - 2))) -(1 - 1/(1 + exp(2 * (- 2)))));
+            std::cout << "5. - Xpn[0]= " << (5. - Xpn[0])/dist << '\n';
+            double x1 = (5. - Xpn[0])/dist * snormal;
+            double x2 = (5. - Xpn[1])/dist * snormal;
             //set angle of rotation
             //rotate normal by angle
             Particles.getProp<POLARIZATION>(p)[x] = cos(phi)*x1 - sin(phi)*x2;
@@ -629,7 +747,8 @@ int main(int argc, char* argv[])
             Particles.getProp<F3>(p) = phi;
 
             if (Particles.getProp<PID>(p)==0){
-              double v = (dis(gen) - (max/2.)) * M_PI;
+              double smooth = 1/(exp((dist - 2.)*2) +1);
+              double v = (dis(gen) - (max/2.)) * M_PI * smooth;
               Particles_bulk.getProp<POLARIZATION>(p)[x] = cos(v)*Particles_bulk.getProp<POLARIZATION>(p)[x] - sin(v)*Particles_bulk.getProp<POLARIZATION>(p)[y];
               Particles_bulk.getProp<POLARIZATION>(p)[y] = sin(v)*Particles_bulk.getProp<POLARIZATION>(p)[x] + cos(v)*Particles_bulk.getProp<POLARIZATION>(p)[y];
               Particles.getProp<F3>(p) = phi+v;
@@ -761,8 +880,8 @@ int main(int argc, char* argv[])
 
         Particles.write("Init");
 
-        Derivative_x Dx(Particles,ord,rCut,1.9,support_options::RADIUS), Bulk_Dx(Particles_bulk,ord,rCut); //was 3.1 instead of 1.9 before
-        Derivative_y Dy(Particles, ord, rCut,1.9,support_options::RADIUS), Bulk_Dy(Particles_bulk,ord,rCut); // -''-
+        Derivative_x Dx(Particles,ord,rCut,1.9,support_options::RADIUS), Bulk_Dx(Particles_bulk,ord,rCut,1.9,support_options::RADIUS); //was 3.1 instead of 1.9 before
+        Derivative_y Dy(Particles, ord, rCut,1.9,support_options::RADIUS), Bulk_Dy(Particles_bulk,ord,rCut,1.9,support_options::RADIUS); // -''-
         Derivative_xy Dxy(Particles, ord, rCut,1.9,support_options::RADIUS);
         auto Dyx = Dxy;
         Derivative_xx Dxx(Particles, ord, rCut,1.9,support_options::RADIUS);
@@ -788,8 +907,9 @@ int main(int argc, char* argv[])
         vy.setId(1);
         timer tt;
         timer tt3;
-        dPol_bulk = Pol_bulk;
-        dPol_boundary = 0;
+        dPol = Pol;
+        // dPol_bulk = Pol_bulk;
+        // dPol_boundary = 0;
         double V_err = 1, V_err_old;
         double tim=0;
 
@@ -797,7 +917,7 @@ int main(int argc, char* argv[])
         std::vector<double> inter_times;
         size_t steps;
 
-        steps=boost::numeric::odeint::integrate_adaptive(boost::numeric::odeint::make_controlled(1e-8,1e-7,abmA),System,tPol,tim,tf,dt,CalcVelocityObserver);
+        steps=boost::numeric::odeint::integrate_adaptive(boost::numeric::odeint::make_controlled(timetol,1e2*timetol,abmA),System,tPol,tim,tf,dt,CalcVelocityObserver);
         //steps=boost::numeric::odeint::integrate_const(euler,System,tPol,tim,tf,dt,CalcVelocityObserver);
 
         std::cout << "Time steps: " << steps << std::endl;
