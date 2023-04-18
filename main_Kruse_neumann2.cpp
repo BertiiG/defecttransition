@@ -61,6 +61,11 @@ openfpm::vector<aggregate<vect_dist_key_dx[2]>> CorrVec;        // vector to sto
 
 std::vector<double> avangle;
 std::vector<double> fes;
+std::vector<double> fesBend;
+std::vector<double> fesSplay;
+std::ofstream AvAngle("avangle.txt");
+std::ofstream FesBend("fesbend.txt");
+std::ofstream FesSplay("fessplay.txt")
 //Functor to Compute RHS of the time derivative of the polarity
 template<typename DX,typename DY,typename DXX,typename DXY,typename DYY>
 struct PolarEv
@@ -589,7 +594,8 @@ struct CalcVelocity
           //std::cout << "bla" << '\n';
           if(sum2<fes[i]){
             minimum=true;}
-          else if (fabs(fes[i-1])<1e-6){minimum=true;}
+          else if (fabs(fes[i-1])<1e-6){
+            minimum=true;}
           else
             minimum = false;
           }
