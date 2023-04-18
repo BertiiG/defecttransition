@@ -14,6 +14,9 @@
 #include "Vector/vector_dist_subset.hpp"
 #include "DCPSE/DCPSE_op/EqnsStruct.hpp"
 #include "OdeIntegrators/OdeIntegrators.hpp"
+#include <vector>
+//#include <bits/stdc++.h>
+//#include "map_vector_std_util.hpp"
 
 constexpr int x = 0;
 constexpr int y = 1;
@@ -21,8 +24,8 @@ constexpr int POLARIZATION= 0,VELOCITY = 1, VORTICITY = 2, NORMAL = 3,PRESSURE =
 
 
 double eta = 5.0;
-double nu = 1.0;
-double gama = 5.0;
+double nu = 2.;
+double gama = 5.;
 double zeta = -1.0;
 double lambda = 3.0;
 double Ks = 1.0;
@@ -45,7 +48,7 @@ timer gt;
 timer tt2;
 
 int flag = 1;
-double steady_tol=1e-6;
+double steady_tol=1e-4;
 
 void *vectorGlobal=nullptr,*vectorGlobal_bulk=nullptr,*vectorGlobal_boundary=nullptr;
 const openfpm::vector<std::string>
@@ -57,6 +60,7 @@ typedef vector_dist_subset<2, double, Activegels> vector_type2;
 openfpm::vector<aggregate<vect_dist_key_dx[2]>> CorrVec;        // vector to store the Ids for the Neumann BC, 0: boundary 1: bulk
 
 std::vector<double> avangle;
+std::vector<double> fes;
 //Functor to Compute RHS of the time derivative of the polarity
 template<typename DX,typename DY,typename DXX,typename DXY,typename DYY>
 struct PolarEv
@@ -155,16 +159,16 @@ struct PolarEv
 
 
         //erickson stress from Ramaswamy paper, same as above
-        sigma[x][x] = - Ks * Dx(Pol[x]) * Dx(Pol[x]) - Ks * Dy(Pol[x]) * Dx(Pol[y])
+        sigma[x][x] = - Ks * Dx(Pol[x]) * Dx(Pol[x]) - Ks * Dy(Pol[y]) * Dx(Pol[x])
                       - Kb * Dx(Pol[y]) * Dx(Pol[y]) + Kb * Dy(Pol[x]) * Dx(Pol[y])
                       - k * Dx(Pol[x]);
-        sigma[x][y] = - Ks * Dy(Pol[y]) * Dx(Pol[y]) - Ks * Dx(Pol[y]) * Dx(Pol[x])
+        sigma[x][y] = - Ks * Dy(Pol[y]) * Dx(Pol[y]) - Ks * Dx(Pol[x]) * Dx(Pol[y])
                       - Kb * Dy(Pol[x]) * Dx(Pol[x]) + Kb * Dx(Pol[y]) * Dx(Pol[x])
                       - k * Dx(Pol[y]);
-        sigma[y][x] = - Ks * Dx(Pol[x]) * Dy(Pol[x]) - Ks * Dy(Pol[x]) * Dy(Pol[y])
+        sigma[y][x] = - Ks * Dx(Pol[x]) * Dy(Pol[x]) - Ks * Dy(Pol[y]) * Dy(Pol[x])
                       - Kb * Dx(Pol[y]) * Dy(Pol[y]) + Kb * Dy(Pol[x]) * Dy(Pol[y])
                       - k * Dy(Pol[x]);
-        sigma[y][y] = - Ks * Dy(Pol[y]) * Dy(Pol[x]) - Ks * Dx(Pol[y]) * Dy(Pol[x])
+        sigma[y][y] = - Ks * Dy(Pol[y]) * Dy(Pol[x]) - Ks * Dx(Pol[x]) * Dy(Pol[y])
                       - Kb * Dy(Pol[x]) * Dy(Pol[x]) + Kb * Dx(Pol[y]) * Dy(Pol[x])
                       - k * Dy(Pol[y]);
 
@@ -178,24 +182,23 @@ struct PolarEv
         // calulate FranckEnergyDensity
         FranckEnergyDensity = (Ks/2.) * ((Dx(Pol[x]) * Dx(Pol[x]))
                               + (Dy(Pol[y]) * Dy(Pol[y]))
-                              + (Dx(Pol[y]) * Dx(Pol[y]))
-                              + (Dy(Pol[x]) * Dy(Pol[x])))
-                              - ((Kb-Ks)/2.) * ((Dy(Pol[x]) * Dy(Pol[x])) //hier eig + statt -?
+                              + 2 * (Dx(Pol[x])) * (Dy(Pol[y])))
+                              + (Kb/2.) * ((Dy(Pol[x]) * Dy(Pol[x])) //hier eig + statt -?
                               + (Dx(Pol[y]) * Dx(Pol[y]))
                               - 2. * Dy(Pol[x]) * Dx(Pol[y]))
                               + chi2/2. * (Pol[x] * Pol[x] + Pol[y] * Pol[y])
-                              + chi4/2. * (Pol[x] * Pol[x] * Pol[x] * Pol[x] + Pol[y] * Pol[y] * Pol[y] * Pol[y] + 2 * Pol[x] * Pol[x] * Pol[y] * Pol[y])
+                              + chi4/4. * (Pol[x] * Pol[x] * Pol[x] * Pol[x] + Pol[y] * Pol[y] * Pol[y] * Pol[y] + 2 * Pol[x] * Pol[x] * Pol[y] * Pol[y])
                               + k * (Dx(Pol[x]) + Dy(Pol[y]))
                               ;
         Particles.ghost_get<FE>(SKIP_LABELLING);
 
         //try other equation for h_x and h_y
         f1 = (chi2 * Pol[x] + 2. * chi4 * Pol[x] * Pol[x] * Pol[x] + 2. * chi4 * Pol[y] * Pol[y] * Pol[x])
-            + Ks * (Dxx(Pol[x]) + 2. * Dyy(Pol[x]) - Dyx(Pol[y]))
-            + Kb * (Dyx(Pol[y]) - Dyy(Pol[x]));
+            + Ks * (Dxx(Pol[x]) + Dyx(Pol[y]))
+            + Kb * (Dyy(Pol[x]) - Dyx(Pol[y]));
         f2 = (chi2 * Pol[y] + 2. * chi4 * Pol[y] * Pol[y] * Pol[y] + 2. * chi4 * Pol[x] * Pol[x] * Pol[y])
-            + Ks * (Dyy(Pol[y]) + 2. * Dxx(Pol[y]) - Dyx(Pol[x]))
-            + Kb * (Dxy(Pol[x]) - Dxx(Pol[y]));
+            + Ks * (Dyy(Pol[y]) + Dyx(Pol[x]))
+            + Kb * (Dxx(Pol[y]) - Dxy(Pol[x]));
 
         Particles.ghost_get<F1, F2>(SKIP_LABELLING);
         texp_v<double> Dxf1 = Dx(f1),Dxf2 = Dx(f2), Dyf1 = Dy(f1), Dyf2 = Dy(f2);
@@ -207,26 +210,28 @@ struct PolarEv
         Particles.ghost_get<F4, F5>(SKIP_LABELLING);
 
         // calulate RHS of Stokes equ (without pressure (because pressure correction will be done later)
-        dV[x] = - Dx(sigma[x][x]) - Dy(sigma[x][y]) //erickson stress
+        dV[x] = (- Dx(sigma[x][x]) - Dy(sigma[x][y]) //erickson stress
                 - .5 * (f2 * Dy(Pol[x]) + Pol[x] * Dyf2
                         - f1 * Dy(Pol[y]) - Pol[y] * Dyf1)
                 + zeta * delmu * ( Pol[x] * Dx(Pol[x]) + Pol[y] * Dy(Pol[x]) + Pol[x] * Dy(Pol[y]))
                 - nu/2. * (f1 * Dx(Pol[x]) + Pol[x] * Dxf1
                           + f2 * Dy(Pol[x]) + Pol[x] * Dyf2
-                          + f1 * Dy(Pol[y]) + Pol[y] * Dyf1);
+                          + f1 * Dy(Pol[y]) + Pol[y] * Dyf1));
 
-        dV[y] = - Dy(sigma[y][y]) - Dx(sigma[y][x]) //erickson STRESS
+        dV[y] = (- Dy(sigma[y][y]) - Dx(sigma[y][x]) //erickson STRESS
                 - .5 * (f1 * Dx(Pol[y]) + Pol[y] * Dxf1
                         - f2 * Dx(Pol[x]) - Pol[x] * Dxf2)
                 + zeta * delmu * ( Pol[y] * Dy(Pol[y]) + Pol[y] * Dx(Pol[x]) + Pol[x] * Dx(Pol[y]))
                 - nu/2. * (f2 * Dy(Pol[y]) + Pol[y] * Dyf2
                           + f1 * Dx(Pol[y]) + Pol[y] * Dxf1
-                          + f2 * Dx(Pol[x]) + Pol[x] * Dxf2);
+                          + f2 * Dx(Pol[x]) + Pol[x] * Dxf2));
 
         Particles.ghost_get<DV>(SKIP_LABELLING);
         //calculate LHS
         auto Stokes1 = eta * Dxx(V[x]) + eta * Dyy(V[x]);
         auto Stokes2 = eta * Dxx(V[y]) + eta * Dyy(V[y]);
+
+        //Particles.ghost_get<>(SKIP_LABELLING);
 
         tt.stop();
         if (v_cl.rank() == 0) {
@@ -401,19 +406,21 @@ struct PolarEv
         Particles.ghost_get<STRESS, VORTICITY>(SKIP_LABELLING);
 
         dPol[x] = f1/gama
-                  + W[x][y] * Pol[y]
+                  - W[x][y] * Pol[y]
                    - nu * u[x][x] * Pol[x] - nu * u[x][y] * Pol[y]
                    - nu * u[x][x] * Pol[x] - nu * u[y][y] * Pol[x]
                    - (V[x] * Dx(Pol[x]) + V[y] * Dy(Pol[x]))
                    + lambda * delmu * Pol[x]
+                   - (V[x]*Dx(Pol[x])+V[y]*Dy(Pol[x]))
                    ;
 
         dPol[y] = f2/gama
-                  + W[y][x] * Pol[x]
+                  - W[y][x] * Pol[x]
                    - nu * u[y][x] * Pol[x] - nu * u[y][y] * Pol[y]
                    - nu * u[x][x] * Pol[y] - nu * u[y][y] * Pol[y]
                    - (V[x] * Dx(Pol[y]) + V[y] * Dy(Pol[y]))
                    + lambda * delmu * Pol[y]
+                   - (V[x]*Dx(Pol[y])+V[y]*Dy(Pol[y]))
                    ;
        for (int i = 0; i < CorrVec.size(); ++i)
                {
@@ -537,7 +544,7 @@ struct CalcVelocity
         // dPol_boundary[x]=0;
         // dPol_boundary[y]=0;
 
-        std::vector<double> fes;
+
         int ctr2 = 0;
         for (int j =0; j<bulk.size();j++) {
             sum2 += Particles.getProp<FE>(j);
@@ -547,16 +554,51 @@ struct CalcVelocity
         sum2 = sum2/ctr2;
         anglesum = anglesum/ctr2;
 
-        v_cl.max(sum2);
+        //v_cl.max(sum2);
+        dPol[x]=Pol[x]-Pol_old[x];
+        dPol[y]=Pol[y]-Pol_old[y];
+
+        double MaxRateOfChange=0;
+        for (int j = 0; j < bulk.size(); j++) {
+            auto p = bulk.get<0>(j);
+            for (int i=0;i<2;i++){
+                if(fabs((Particles.getProp<DPOL>(p)[i]))>MaxRateOfChange)
+                {
+                    MaxRateOfChange=fabs(Particles.getProp<DPOL>(p)[i]);
+                }
+            }
+        }
+        v_cl.max(MaxRateOfChange);
         v_cl.execute();
         std::cout << "ctr = "<< ctr << '\n';
         std::cout << "v_cl_rank = " << v_cl.rank() << '\n';
         std::cout << "FEsum_new = " << sum2 << '\n';
         std::cout << "angle = " << anglesum << '\n';
         avangle.push_back(anglesum);
-        bool minimum;
-        for (int i=0; i<fes.size();i++){if(sum2<fes[i]){minimum=true;}}
-        if (minimum && ctr >100 && fabs(anglesum_old-anglesum)<=steady_tol) {
+        if(v_cl.rank()==0)
+        {std::cout<<"MaxRateOfChange: "<<MaxRateOfChange<<std::endl;
+        }
+        bool minimum=false;
+        std::cout << "fes size " << fes.size() << '\n';
+
+        // for (int j=0; j>(fes.size()-10);j++){
+        //   fes.erase(j);
+        // }
+        if (fes.size()>10){fes.erase(fes.begin(),fes.end()-10);}
+        for (int i=0; i<fes.size();i++){
+          //std::cout << "bla" << '\n';
+          if(sum2<fes[i]){
+            minimum=true;}
+          else if (fabs(fes[i-1])<1e-6){minimum=true;}
+          else
+            minimum = false;
+          }
+        //int n = fes.size();
+        //if (fabs(fes[n-1])<1e-6){minimum=true;}
+          //use relative error for anglesum!
+        if (minimum){std::cout << "minimum true" << '\n';}
+        if (ctr>100){std::cout << "ctr true" << '\n';}
+        if (minimum && ctr >100 && MaxRateOfChange<steady_tol){//&& fabs(anglesum_old-anglesum)<steady_tol) {
             tt2.stop();
             if(v_cl.rank()==0)
                   {std::cout<<"Steady State Reached at angle = " << anglesum <<'\n';
@@ -571,7 +613,13 @@ struct CalcVelocity
             std::cout << "-----------------------------------------------------------------\n";
         }
 
-        sum3 = sum2;
+        //sum3 = sum2;
+        // push_back_std_op_neste<true, double, double> push( fes, sum2);
+        // // a = fes;
+        // // b = sum2;
+        // push;
+        // push_back_std_op_neste<true, double, double> push(std::vector<double>, double);
+        // push(fes, sum2);
         fes.push_back(sum2);
         anglesum_old = anglesum;
         anglesum =0.0;
@@ -840,9 +888,9 @@ int main(int argc, char* argv[])
 
         Particles.write("Init");
 
-        Derivative_x Dx(Particles,ord,rCut,1.9,support_options::RADIUS), Bulk_Dx(Particles_bulk,ord,rCut,1.9,support_options::RADIUS); //was 3.1 instead of 1.9 before
-        Derivative_y Dy(Particles, ord, rCut,1.9,support_options::RADIUS), Bulk_Dy(Particles_bulk,ord,rCut,1.9,support_options::RADIUS); // -''-
-        Derivative_xy Dxy(Particles, ord, rCut,1.9,support_options::RADIUS);
+        Derivative_x Dx(Particles,ord,rCut,3.1,support_options::RADIUS), Bulk_Dx(Particles_bulk,ord,rCut,1.9,support_options::RADIUS); //was 3.1 instead of 1.9 before
+        Derivative_y Dy(Particles, ord, rCut,3.1,support_options::RADIUS), Bulk_Dy(Particles_bulk,ord,rCut,1.9,support_options::RADIUS); // -''-
+        Derivative_xy Dxy(Particles, ord, rCut,3.1,support_options::RADIUS);
         auto Dyx = Dxy;
         Derivative_xx Dxx(Particles, ord, rCut,1.9,support_options::RADIUS);
         Derivative_yy Dyy(Particles, ord, rCut,1.9,support_options::RADIUS);
@@ -857,6 +905,7 @@ int main(int argc, char* argv[])
 
         PolarEv<Derivative_x,Derivative_y,Derivative_xx,Derivative_xy,Derivative_yy> System(Dx,Dy,Dxx,Dxy,Dyy, Bulk_Dx, Bulk_Dy);
         CalcVelocity<Derivative_x,Derivative_y,Derivative_xx,Derivative_xy,Derivative_yy> CalcVelocityObserver(Dx,Dy,Dxx,Dxy,Dyy);
+        //push_back_std_op_neste<true, double, double> push(std::vector<double>, double);
 
         state_type_2d_ofp tPol;
         tPol.data.get<0>()=Pol[x];
